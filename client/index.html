@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Movie Maker - Video Generation</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <div id="root">
+        <header>
+            <h1>Movie Maker</h1>
+            <div id="auth-bar">
+                <span id="user-greeting" aria-live="polite">Loading...</span>
+            </div>
+        </header>
+        <main>
+            <section class="card">
+                <h2>Account Access</h2>
+                <form id="login-form">
+                    <div class="form-group">
+                        <label for="login-username">Username</label>
+                        <input id="login-username" name="username" type="text" required autocomplete="username">
+                    </div>
+                    <button type="submit" id="login-submit">Sign In</button>
+                </form>
+            </section>
+            <section class="card">
+                <div role="alert" class="error-text"></div>
+            </section>
+        </main>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+</body>
+</html>

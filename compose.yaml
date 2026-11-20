@@ -1,0 +1,195 @@
+###################################################
+# Movie Maker - Production Build Compose Configuration
+#
+# References: compose-prod-build.yml
+#
+# 이 Compose 설정은 프론트엔드(React 18 + TypeScript) 정적 빌드 파일과
+# FastAPI 백엔드가 단일 이미지로 번들링된 프로덕션 환경(Dockerfile target: final)을
+# 제공합니다.
+#
+# 1. Traefik 리버스 프록시 (포트 80 및 443)가 모든 경로(PathPrefix `/`)를 단일 번들 백엔드로 라우팅
+# 2. 백엔드 컨테이너는 루트(`/`)에서 React SPA를 서빙하고 `/api/*`에서 REST/SSE API를 처리
+# 3. MySQL 9.3은 사용자 계정, 세션, 작업(Job), 씬, 샷 메타데이터를 저장
+# 4. Redis 7은 Celery 비동기 작업 큐 및 상태 백엔드 브로커 역할 수행
+# 5. Celery 워커는 분산 비디오 생성 파이프라인(concurrency=1, FIFO)을 실행
+# 6. 미디어 스토리지(/app/storage)는 백엔드와 워커 간 공유 볼륨으로 영구 보존
+###################################################
+
+services:
+
+  ###################################################
+  # Service: proxy
+  #
+  # Traefik v3.6 리버스 프록시 서비스.
+  # 포트 80(HTTP) 및 443(HTTPS)을 통해 들어오는 모든 트래픽(PathPrefix `/`)을
+  # 프로덕션 백엔드 컨테이너(포트 8000)로 전달합니다.
+  ###################################################
+  proxy:
+    image: traefik:v3.6
+    container_name: movie_maker_proxy
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+    ports:
+      - "${PROXY_HTTP_PORT:-8080}:80"
+      - "${PROXY_HTTPS_PORT:-8443}:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+
+  ###################################################
+  # Service: mysql
+  #
+  # MySQL 9.3 데이터베이스 서비스.
+  # 사용자 인증, 세션, 비디오 작업(Job), 씬(Scene), 샷(Shot) 상태 데이터를 영구 저장합니다.
+  ###################################################
+  mysql:
+    image: mysql:9.3
+    container_name: movie_maker_mysql
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: secret
+      MYSQL_DATABASE: movie_agent
+      MYSQL_USER: movie_user
+      MYSQL_PASSWORD: movie_password
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-psecret"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  ###################################################
+  # Service: redis
+  #
+  # Celery 비동기 작업 큐 및 상태 저장을 위한 Redis 7 Alpine 브로커입니다.
+  # 헬스체크(redis-cli ping)를 통해 백엔드와 워커가 준비 완료 후 시작되도록 보장합니다.
+  ###################################################
+  redis:
+    image: redis:7-alpine
+    container_name: movie_maker_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  ###################################################
+  # Service: backend
+  #
+  # 이 서비스는 프론트엔드 정적 빌드 파일(HTML/CSS/JS)과 FastAPI 백엔드 API가
+  # 단일 이미지로 번들링된 프로덕션 컨테이너입니다 (Dockerfile target: final).
+  #
+  # [Docker Compose 이미지 명명 규칙 (Image Naming Convention)]:
+  # 'image: movie-maker-backend:prod' 속성을 지정하여
+  # 로컬 빌드 및 Kubernetes/배포 레지스트리용 태그를 명시합니다.
+  ###################################################
+  backend:
+    image: movie-maker-backend:prod
+    build:
+      context: ./
+      target: final
+    container_name: movie_maker_backend
+    env_file:
+      - path: ./server/.env
+        required: false
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: mysql+pymysql://movie_user:movie_password@mysql:3306/movie_agent?charset=utf8mb4
+      STORAGE_DIR: /app/storage
+      VIDEO_PROVIDER: ${VIDEO_PROVIDER:-mock}
+      SESSION_SECRET: ${SESSION_SECRET:-change-this-to-a-secure-random-secret-key-in-production}
+      LTX_COMFYUI_URL: ${LTX_COMFYUI_URL:-http://host.docker.internal:8188}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8000:8000"
+    volumes:
+      - storage_data:/app/storage
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+    labels:
+      traefik.enable: "true"
+      # [HTTP 라우터 - 포트 80] (특정 IP에 종속되지 않고 localhost 및 임의의 IP/도메인 접속 지원)
+      traefik.http.routers.backend-http.entrypoints: "web"
+      traefik.http.routers.backend-http.rule: "PathPrefix(`/`)"
+      traefik.http.routers.backend-http.service: "backend-service"
+
+      # [HTTPS 라우터 - 포트 443] (특정 IP에 종속되지 않고 localhost 및 임의의 IP/도메인 HTTPS 접속 지원)
+      traefik.http.routers.backend-https.entrypoints: "websecure"
+      traefik.http.routers.backend-https.rule: "PathPrefix(`/`)"
+      traefik.http.routers.backend-https.tls: "true"
+      traefik.http.routers.backend-https.service: "backend-service"
+
+      # 백엔드 컨테이너 내부 포트 8000 바인딩
+      traefik.http.services.backend-service.loadbalancer.server.port: "8000"
+
+  ###################################################
+  # Service: worker
+  #
+  # Celery 파이프라인 워커 컨테이너입니다 (Dockerfile target: worker).
+  # Redis 큐에서 작업을 수신하여 비디오 분할, 샷 생성, FFmpeg 영상 결합을 수행합니다.
+  # GPU VRAM 보호를 위해 concurrency=1 (FIFO)로 실행되며,
+  # 업로드 이미지 및 생성된 비디오 파일을 백엔드와 공유하기 위해 storage_data 볼륨을 마운트합니다.
+  ###################################################
+  worker:
+    image: movie-maker-worker:prod
+    build:
+      context: ./
+      target: worker
+    container_name: movie_maker_worker
+    env_file:
+      - path: ./server/.env
+        required: false
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: mysql+pymysql://movie_user:movie_password@mysql:3306/movie_agent?charset=utf8mb4
+      STORAGE_DIR: /app/storage
+      VIDEO_PROVIDER: ${VIDEO_PROVIDER:-mock}
+      SESSION_SECRET: ${SESSION_SECRET:-change-this-to-a-secure-random-secret-key-in-production}
+      LTX_COMFYUI_URL: ${LTX_COMFYUI_URL:-http://host.docker.internal:8188}
+      C_FORCE_ROOT: "1"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - storage_data:/app/storage
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+###################################################
+# Volumes
+#
+# - mysql_data: MySQL 9.3 데이터베이스 데이터 영구 보존
+# - redis_data: Redis 작업 큐 및 브로커 상태 영구 보존
+# - storage_data: 백엔드와 워커가 공유하는 미디어 업로드 및 생성된 MP4 비디오 스토리지
+###################################################
+volumes:
+  mysql_data:
+  redis_data:
+  storage_data:

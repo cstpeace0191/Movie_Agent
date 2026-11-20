@@ -1,0 +1,213 @@
+:root {
+    --bg-color: #0f172a;
+    --card-bg: #1e293b;
+    --text-primary: #f8fafc;
+    --text-secondary: #cbd5e1;
+    --accent: #38bdf8;
+    --accent-hover: #0284c7;
+    --border: #475569;
+    --error: #f87171;
+    --success: #4ade80;
+}
+
+body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background-color: var(--bg-color);
+    color: var(--text-primary);
+    line-height: 1.5;
+    padding: 1rem;
+}
+
+header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 2px solid var(--border);
+    padding-bottom: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+h1, h2, h3 {
+    color: var(--text-primary);
+    margin-top: 0;
+}
+
+.card {
+    background-color: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.auth-forms {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2rem;
+}
+
+@media (max-width: 640px) {
+    .auth-forms {
+        grid-template-columns: 1fr;
+    }
+}
+
+.form-group {
+    margin-bottom: 1rem;
+}
+
+label {
+    display: block;
+    margin-bottom: 0.5rem;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+input[type="text"],
+input[type="password"],
+input[type="number"],
+textarea,
+select {
+    width: 100%;
+    padding: 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background-color: #0f172a;
+    color: var(--text-primary);
+    box-sizing: border-box;
+}
+
+input:focus-visible,
+textarea:focus-visible,
+button:focus-visible,
+select:focus-visible {
+    outline: 3px solid var(--accent);
+    outline-offset: 2px;
+}
+
+button {
+    background-color: var(--accent);
+    color: #0f172a;
+    font-weight: 600;
+    border: none;
+    padding: 0.6rem 1.2rem;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+button:hover {
+    background-color: var(--accent-hover);
+}
+
+.btn-download {
+    display: inline-block;
+    background-color: var(--success);
+    color: #0f172a;
+    font-weight: 600;
+    text-decoration: none;
+    padding: 0.5rem 0.9rem;
+    border-radius: 4px;
+    margin-right: 0.5rem;
+    border: none;
+    cursor: pointer;
+    text-align: center;
+}
+
+.btn-download:hover {
+    background-color: #22c55e;
+}
+
+.btn-download:focus-visible {
+    outline: 3px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.btn-stop {
+    background-color: var(--error);
+    color: #ffffff;
+    font-weight: 600;
+    border: none;
+    padding: 0.5rem 0.9rem;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.btn-stop:hover {
+    background-color: #ef4444;
+}
+
+.btn-stop:focus-visible {
+    outline: 3px solid var(--error);
+    outline-offset: 2px;
+}
+
+.btn-danger {
+    background-color: #7f1d1d;
+    color: #fecaca;
+    border: 1px solid #b91c1c;
+    font-weight: 600;
+    padding: 0.5rem 0.9rem;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.btn-danger:hover {
+    background-color: #991b1b;
+    color: #ffffff;
+}
+
+.btn-danger:focus-visible {
+    outline: 3px solid var(--error);
+    outline-offset: 2px;
+}
+
+.options-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 1rem;
+}
+
+#progress-bar-container {
+    width: 100%;
+    height: 12px;
+    background-color: #334155;
+    border-radius: 6px;
+    overflow: hidden;
+    margin: 1rem 0;
+}
+
+#progress-bar {
+    height: 100%;
+    background-color: var(--accent);
+    transition: width 0.3s ease;
+}
+
+.error-text {
+    color: var(--error);
+    font-weight: 600;
+    min-height: 1.5rem;
+}
+
+.hidden {
+    display: none !important;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 1rem;
+}
+
+th, td {
+    border: 1px solid var(--border);
+    padding: 0.75rem;
+    text-align: left;
+}
+
+th {
+    background-color: #334155;
+}
+

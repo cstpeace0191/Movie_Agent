@@ -1,0 +1,57 @@
+[project]
+name = "movie-agent"
+version = "0.1.0"
+description = "Movie video generation from scenario and photos"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi[standard]>=0.115.0",
+    "sqlalchemy>=2.0.0",
+    "pymysql>=1.1.0",
+    "cryptography>=42.0.0",
+    "pydantic-settings>=2.0.0",
+    "celery>=5.3.0",
+    "redis>=5.0.0",
+    "httpx>=0.27.0",
+    "argon2-cffi>=23.1.0",
+    "anthropic>=0.20.0",
+    "google-genai>=0.1.0",
+    "sse-starlette>=2.0.0",
+    "python-multipart>=0.0.9",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "ruff>=0.4.0",
+    "mypy>=1.10.0",
+    "playwright>=1.40.0",
+    "types-redis>=4.6.0",
+]
+
+[tool.fastapi]
+entrypoint = "server.app.main:app"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = false
+warn_return_any = false
+warn_unused_configs = true
+files = ["server", "tests"]
+ignore_missing_imports = true
+disable_error_code = ["arg-type", "assignment", "no-any-return", "misc"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"

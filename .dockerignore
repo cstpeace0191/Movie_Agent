@@ -1,0 +1,15 @@
+.git
+.github
+.venv
+.mypy_cache
+.pytest_cache
+.ruff_cache
+__pycache__
+*.pyc
+storage/*
+!storage/.gitkeep
+client/node_modules
+client/dist
+tests/.cache
+*.log
+

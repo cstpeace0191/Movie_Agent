@@ -1,0 +1,7 @@
+{
+  "health": 20.0,
+  "providers": 60.0,
+  "auth_me": 40.0,
+  "jobs_list": 80.0,
+  "job_detail": 50.0
+}
