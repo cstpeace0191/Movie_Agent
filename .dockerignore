@@ -13,3 +13,8 @@ client/dist
 tests/.cache
 *.log
 
+
+# Secrets are injected at run time (compose env_file / docker run --env-file), never baked into images.
+.env
+**/.env
+!**/.env.example
