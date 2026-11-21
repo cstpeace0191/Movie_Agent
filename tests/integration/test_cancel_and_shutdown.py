@@ -112,14 +112,16 @@ async def test_system_shutdown_endpoint():
         res = await ac.post("/api/system/shutdown")
         assert res.status_code == 401
 
-    # 2. With auth and CSRF, mock os.kill to avoid killing test process
+    # 2. With auth and CSRF. Replace the scheduler so no SIGTERM reaches the test process:
+    # the real one fires from a thread after the request returns.
     async with AsyncClient(
         transport=transport, base_url="http://test", cookies={"movie_session": token}
     ) as ac:
-        with patch("os.kill"):
+        with patch("server.app.api.jobs.schedule_process_shutdown") as fake_shutdown:
             res = await ac.post(
                 "/api/system/shutdown",
                 headers={"X-CSRF-Token": csrf_token},
             )
             assert res.status_code == 200
             assert res.json()["status"] == "shutting_down"
+            fake_shutdown.assert_called_once_with()

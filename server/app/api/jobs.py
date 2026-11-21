@@ -501,22 +501,31 @@ def cancel_job(
     return {"status": job.status, "message": f"Job is already {job.status}."}
 
 
+def schedule_process_shutdown(delay_seconds: float = 1.0) -> None:
+    """Send SIGTERM to this process after a short delay, from a daemon thread.
+
+    Kept separate from the route so tests can replace it; patching ``os.kill`` is not enough
+    because the thread fires after a test's patch has already been undone.
+    """
+    import os
+    import signal
+    import threading
+    import time
+
+    def delayed_exit() -> None:
+        time.sleep(delay_seconds)
+        os.kill(os.getpid(), signal.SIGTERM)
+
+    threading.Thread(target=delayed_exit, daemon=True).start()
+
+
 @router.post("/system/shutdown")
 def shutdown_system(
     csrf_check: None = Depends(require_csrf),
     user: User = Depends(require_user),
 ):
     """Gracefully initiate server shutdown."""
-    import os
-    import signal
-    import threading
-    import time
-
-    def delayed_exit():
-        time.sleep(1.0)
-        os.kill(os.getpid(), signal.SIGTERM)
-
-    threading.Thread(target=delayed_exit, daemon=True).start()
+    schedule_process_shutdown()
     return {"status": "shutting_down", "message": "Application shutdown initiated."}
 
 

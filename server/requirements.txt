@@ -14,6 +14,7 @@ sse-starlette>=2.0.0
 python-multipart>=0.0.9
 aiosmtpd>=1.4.6
 atpublic>=9.0.0
+imageio-ffmpeg>=0.5.1
 
 # Tooling and testing
 pytest>=8.0.0
