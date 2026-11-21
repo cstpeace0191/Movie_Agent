@@ -28,12 +28,19 @@ def gen_uuid() -> str:
 
 # Validation helpers
 USERNAME_REGEX = re.compile(r"^[a-zA-Z0-9_]{3,32}$")
+EMAIL_REGEX = re.compile(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$")
 
 
 def validate_username(username: str) -> bool:
     if not isinstance(username, str):
         return False
     return bool(USERNAME_REGEX.match(username))
+
+
+def validate_email(email: str | None) -> bool:
+    if not email or not isinstance(email, str):
+        return False
+    return bool(EMAIL_REGEX.match(email.strip()))
 
 
 def validate_password(password: str) -> bool:
@@ -65,6 +72,12 @@ class User(Base):
     username = Column(String(32), unique=True, index=True, nullable=False)
     username_lower = Column(String(32), unique=True, index=True, nullable=False)
     password_hash = Column(String(255), nullable=False)
+    country = Column(String(64), nullable=True)
+    phone = Column(String(32), nullable=True)
+    email = Column(String(255), nullable=True, index=True)
+    email_verified = Column(Boolean, default=False, nullable=False)
+    verification_code = Column(String(64), nullable=True)
+    verification_expires_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=utcnow, nullable=False)
 
     sessions = relationship("Session", back_populates="user", cascade="all, delete-orphan")
@@ -192,3 +205,16 @@ class SourceImage(Base):
     job = relationship("Job", back_populates="source_images")
 
     __table_args__ = (UniqueConstraint("job_id", "position", name="uq_image_job_position"),)
+
+
+class SentEmail(Base):
+    __tablename__ = "sent_emails"
+
+    id = Column(String(36), primary_key=True, default=gen_uuid)
+    recipient = Column(String(255), index=True, nullable=False)
+    sender = Column(String(255), nullable=False)
+    subject = Column(String(255), nullable=False)
+    body_text = Column(Text, nullable=False)
+    verification_code = Column(String(16), nullable=True)
+    status = Column(String(32), default="delivered", nullable=False)
+    created_at = Column(DateTime, default=utcnow, index=True, nullable=False)

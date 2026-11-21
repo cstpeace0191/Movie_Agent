@@ -21,6 +21,19 @@ class Settings(BaseSettings):
     STORAGE_DIR: str = "./storage"
     ENV: str = "test" if "pytest" in sys.modules else "development"
 
+    # SMTP email configuration
+    SMTP_HOST: str | None = None
+    SMTP_PORT: int = 587
+    SMTP_USER: str | None = None
+    SMTP_PASSWORD: str | None = None
+    SMTP_FROM: str = "noreply@moviemaker.local"
+    SMTP_TLS: bool = True
+
+    # Built-in Python aiosmtpd Mail Server configuration
+    MAIL_SERVER_ENABLED: bool = True
+    MAIL_SERVER_HOST: str = "0.0.0.0"
+    MAIL_SERVER_PORT: int = 1025
+
     # Limit constants
     MAX_IMAGES_PER_JOB: int = 100
     MAX_IMAGE_SIZE_BYTES: int = 20 * 1024 * 1024  # 20 MiB

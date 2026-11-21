@@ -172,3 +172,11 @@ def run_job(self, job_id: str):
 @celery_app.task(name="expire_old_jobs_task")
 def expire_old_jobs_task():
     return expire_old_jobs()
+
+
+@celery_app.task(name="send_verification_email_task")
+def send_verification_email_task(to_email: str, code: str, username: str) -> bool:
+    """Asynchronous Celery task for dispatching verification emails."""
+    from server.app.email_sender import send_verification_email
+
+    return send_verification_email(to_email=to_email, code=code, username=username)

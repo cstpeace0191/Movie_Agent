@@ -16,6 +16,46 @@ class ErrorResponse(BaseModel):
 class UserRegister(BaseModel):
     username: str
     password: str
+    country: str | None = None
+    phone: str | None = None
+    email: str | None = None
+
+
+class CheckUsernameResponse(BaseModel):
+    available: bool
+    message: str
+
+
+class VerifyEmailRequest(BaseModel):
+    username: str
+    code: str
+
+
+class VerifyEmailResponse(BaseModel):
+    success: bool
+    message_ko: str = "인증되었습니다"
+    message_en: str = "You are Verified"
+
+
+class ResendCodeRequest(BaseModel):
+    username: str
+
+
+class ResendCodeResponse(BaseModel):
+    success: bool
+    message: str
+    email: str | None = None
+    code: str | None = None
+
+
+class MailMessageOut(BaseModel):
+    id: str
+    recipient: str
+    sender: str
+    subject: str
+    body_text: str
+    verification_code: str | None = None
+    created_at: datetime
 
 
 class UserLogin(BaseModel):
@@ -26,6 +66,12 @@ class UserLogin(BaseModel):
 class UserOut(BaseModel):
     id: str
     username: str
+    email: str | None = None
+    country: str | None = None
+    phone: str | None = None
+    email_verified: bool = True
+    verification_required: bool = False
+    debug_code: str | None = None
 
 
 class LoginResponse(BaseModel):
