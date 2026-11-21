@@ -423,3 +423,25 @@ th {
         font-size: 0.85rem;
     }
 }
+
+/* Feature 002: render options (scene transitions) */
+.render-options .options-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+.render-options select,
+.render-options input[type="number"] {
+  width: 100%;
+}
+.render-options .hint {
+  margin: 4px 0 0;
+  font-size: 0.85rem;
+  color: var(--text-secondary); /* #cbd5e1 on the #1e293b card: 11.0:1 */
+}
+.render-options .field-error {
+  margin: 4px 0 0;
+  font-size: 0.9rem;
+  color: #fca5a5; /* 7.6:1 on the #1e293b card; the text itself states the problem */
+  font-weight: 600;
+}

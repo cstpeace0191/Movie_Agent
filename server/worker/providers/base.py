@@ -12,6 +12,9 @@ class ShotRequest:
     fps: int
     source_image_path: Path | None  # None for text-to-video (T2V)
     output_path: Path  # provider writes the clip here
+    # Feature 002: zoom_in | zoom_out | pan_left | pan_right | pan_up | pan_down, resolved by the
+    # worker. Providers that do not animate still images MUST ignore it.
+    motion: str | None = None
 
 
 @dataclass(frozen=True)
@@ -33,9 +36,16 @@ class ProviderError(Exception):
 
 
 class VideoProvider(Protocol):
-    """Protocol defining the standard interface for all video generation engines."""
+    """Protocol defining the standard interface for all video generation engines.
+
+    Class attributes (feature 002 contract delta):
+        requires_photos: True if the engine cannot do text-to-video.
+        sends_data_externally: True if scenario text or photos leave the server.
+    """
 
     name: str
+    requires_photos: bool
+    sends_data_externally: bool
 
     def generate(self, request: ShotRequest) -> ShotResult:
         """Generate one clip. Blocks until done or fails. Called from a worker only."""

@@ -9,8 +9,8 @@ All 001 rules still apply.
 ```python
 class VideoProvider(Protocol):
     name: str
-    requires_photos: bool          # NEW. True: cannot do text-to-video
-    sends_data_externally: bool    # NEW (moves the 001 API-side flag onto the provider)
+    requires_photos: bool  # NEW. True: cannot do text-to-video
+    sends_data_externally: bool  # NEW (moves the 001 API-side flag onto the provider)
 
     def generate(self, request: ShotRequest) -> ShotResult: ...
 
@@ -24,9 +24,9 @@ class ShotRequest:
     fps: int
     source_image_path: Path | None
     output_path: Path
-    motion: str | None = None      # NEW. zoom_in | zoom_out | pan_left | pan_right | pan_up | pan_down.
-                                   # Resolved by the worker (auto -> concrete). Providers that do not
-                                   # use it MUST ignore it.
+    motion: str | None = None  # NEW. zoom_in | zoom_out | pan_left | pan_right | pan_up | pan_down.
+    # Resolved by the worker (auto -> concrete). Providers that do not
+    # use it MUST ignore it.
 ```
 
 The API decides "needs photos" and "needs disclosure" from these attributes through the registry, never

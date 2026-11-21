@@ -42,5 +42,14 @@ class Settings(BaseSettings):
     SESSION_LIFETIME_DAYS: int = 7
     TASK_TIME_LIMIT_SECONDS: int = 1800  # 30 minutes
 
+    # Feature 002: captions, compose, music (research R5, R6, R10)
+    CAPTION_MODEL: str = "claude-opus-5-5"
+    CAPTION_CHUNK_SIZE: int = 20
+    CAPTION_IMAGE_MAX_PX: int = 1024
+    MAX_AUDIO_SIZE_BYTES: int = 30 * 1024 * 1024  # 30 MiB
+    FONTS_DIR: str = "server/assets/fonts"
+    MUSIC_DIR: str = "server/assets/music"
+    CARD_SECONDS: float = 3.0
+
 
 settings = Settings()

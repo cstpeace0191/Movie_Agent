@@ -23,6 +23,16 @@ def is_registered(name: str) -> bool:
     return name in _PROVIDERS
 
 
+def get_provider_class(name: str) -> type[VideoProvider] | None:
+    """Return the registered provider class (for capability flags), or None if unknown."""
+    return _PROVIDERS.get(name)
+
+
+def registered_names() -> list[str]:
+    """Return the names of all registered providers."""
+    return list(_PROVIDERS)
+
+
 def get_provider(name: str) -> VideoProvider:
     """Instantiate and return the registered VideoProvider for the given engine name."""
     cls = _PROVIDERS.get(name)

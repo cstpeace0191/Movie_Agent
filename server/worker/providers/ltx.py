@@ -6,6 +6,8 @@ from server.worker.providers.base import ProviderError, ShotRequest, ShotResult
 
 class LtxVideoProvider:
     name: str = "ltx-2.3"
+    requires_photos: bool = False
+    sends_data_externally: bool = False
 
     def __init__(self, comfyui_url: str | None = None):
         self.comfyui_url = comfyui_url or settings.LTX_COMFYUI_URL

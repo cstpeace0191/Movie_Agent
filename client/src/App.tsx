@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, FormEvent, ChangeEvent } from 'react';
-import { Provider, Job, SSEProgressEvent, MailMessage } from './types';
+import { Provider, Job, SSEProgressEvent, MailMessage, Transition } from './types';
+import { RenderOptions, transitionSecondsError } from './components/RenderOptions';
 import {
   getMe,
   loginUser,
@@ -74,6 +75,8 @@ export const App: React.FC = () => {
   const [height, setHeight] = useState(480);
   const [secondsPerShot, setSecondsPerShot] = useState(3.0);
   const [fps, setFps] = useState(16);
+  const [transition, setTransition] = useState<Transition>('none');
+  const [transitionSeconds, setTransitionSeconds] = useState(0.5);
   const [selectedProvider, setSelectedProvider] = useState('ltx-2.3');
   const [externalConsent, setExternalConsent] = useState(false);
   const [providers, setProviders] = useState<Provider[]>([]);
@@ -410,6 +413,12 @@ export const App: React.FC = () => {
       return;
     }
 
+    // Transition length must be valid before anything is sent (FR-042)
+    if (transition !== 'none' && transitionSecondsError(transitionSeconds, t)) {
+      setGlobalError(t.transitionSecondsError);
+      return;
+    }
+
     // Cloud consent gate
     if (selectedProvider === 'gemini-omni-1.2-flash' && !externalConsent) {
       setGlobalError('Confirmation is required before sending data to cloud AI.');
@@ -434,6 +443,10 @@ export const App: React.FC = () => {
     formData.append('chain_frames', 'true');
     formData.append('external_consent', externalConsent ? 'true' : 'false');
     formData.append('include_all_photos', includeAllPhotos ? 'true' : 'false');
+    formData.append('transition', transition);
+    if (transition !== 'none') {
+      formData.append('transition_seconds', String(transitionSeconds));
+    }
 
     try {
       const created = await createJob(formData, csrfToken);
@@ -1047,6 +1060,14 @@ export const App: React.FC = () => {
                     />
                   </div>
                 </div>
+
+                <RenderOptions
+                  t={t}
+                  transition={transition}
+                  transitionSeconds={transitionSeconds}
+                  onTransitionChange={setTransition}
+                  onTransitionSecondsChange={setTransitionSeconds}
+                />
 
                 <fieldset className="form-group">
                   <legend>{t.videoEngine}</legend>

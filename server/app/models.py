@@ -3,6 +3,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     Column,
     DateTime,
@@ -109,7 +110,7 @@ class Job(Base):
     scenario = Column(Text, nullable=True)
     status = Column(
         String(32), default="queued", nullable=False, index=True
-    )  # queued, running, succeeded, failed, expired
+    )  # drafting, awaiting_review, queued, running, succeeded, failed, expired
     progress = Column(Integer, default=0, nullable=False)
     message = Column(String(200), default="Queued", nullable=False)
     failure_reason = Column(String(500), nullable=True)
@@ -125,6 +126,15 @@ class Job(Base):
     planned_seconds = Column(Float, default=0.0, nullable=False)
     unused_image_count = Column(Integer, default=0, nullable=False)
     final_video_path = Column(String(500), nullable=True)
+
+    # Feature 002 (data-model.md). Render options default to {} = feature 001 behaviour.
+    render_options = Column(JSON, default=dict, nullable=True)
+    text_assist_consent_at = Column(DateTime, nullable=True)
+    review_confirmed_at = Column(DateTime, nullable=True)
+    bgm_path = Column(String(500), nullable=True)
+    subtitles_srt_path = Column(String(500), nullable=True)
+    subtitles_ass_path = Column(String(500), nullable=True)
+    final_duration_seconds = Column(Float, nullable=True)
 
     created_at = Column(DateTime, default=utcnow, nullable=False)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
@@ -159,6 +169,16 @@ class Scene(Base):
         String(36), ForeignKey("source_images.id", ondelete="SET NULL"), nullable=True
     )
     split_method = Column(String(32), default="paragraph", nullable=False)
+
+    # Feature 002 (data-model.md). Card scenes (kind title/ending) may have empty description.
+    kind = Column(String(16), default="scene", nullable=False)  # scene, title, ending
+    caption = Column(Text, nullable=True)
+    caption_source = Column(String(16), nullable=True)  # assisted, verbatim, user
+    narration = Column(Text, nullable=True)
+    transition = Column(String(32), nullable=True)  # null = job default; transition INTO scene
+    motion = Column(String(16), nullable=True)
+    start_seconds = Column(Float, nullable=True)  # timeline result
+    length_seconds = Column(Float, nullable=True)  # measured clip length on the timeline
 
     job = relationship("Job", back_populates="scenes")
     source_image = relationship("SourceImage")
@@ -201,6 +221,7 @@ class SourceImage(Base):
     alt_text = Column(String(500), nullable=True)
     storage_path = Column(String(500), nullable=False)
     used = Column(Boolean, default=True, nullable=False)
+    note = Column(String(500), nullable=True)  # feature 002: note for caption, <= 500 chars
 
     job = relationship("Job", back_populates="source_images")
 

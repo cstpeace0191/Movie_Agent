@@ -7,6 +7,8 @@ from server.worker.providers.base import ProviderError, ShotRequest, ShotResult
 
 class MockVideoProvider:
     name: str = "mock"
+    requires_photos: bool = False
+    sends_data_externally: bool = False
 
     def __init__(self):
         self.attempt_counts: dict[int, int] = {}

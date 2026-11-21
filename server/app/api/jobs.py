@@ -23,7 +23,8 @@ from server.app.auth import require_csrf, require_user
 from server.app.config import settings
 from server.app.db import SessionLocal, get_db
 from server.app.models import Job, Scene, Shot, SourceImage, User, utcnow, validate_alt_text
-from server.app.schemas import JobOut, JobSummary, ProviderOut, ShotOut
+from server.app.render_options import RenderOptions, RenderOptionsError, parse_render_options
+from server.app.schemas import JobOut, JobSummary, ProviderOut, SceneOut, ShotOut
 from server.app.storage import (
     StorageValidationError,
     delete_job_media,
@@ -32,7 +33,7 @@ from server.app.storage import (
 )
 from server.worker.pipeline.mapping import map_photo_only
 from server.worker.pipeline.split import split_by_paragraphs
-from server.worker.providers.registry import is_registered
+from server.worker.providers.registry import get_provider_class, is_registered
 
 router = APIRouter(prefix="/api", tags=["jobs"])
 
@@ -49,7 +50,7 @@ async def get_providers(user: User = Depends(require_user)):
             location="local",
             enabled=True,
             is_default=(settings.VIDEO_PROVIDER == "ltx-2.3"),
-            sends_data_externally=False,
+            **_capabilities("ltx-2.3"),
             max_clip_seconds=None,
             disabled_reason=None,
         ),
@@ -59,7 +60,7 @@ async def get_providers(user: User = Depends(require_user)):
             location="cloud",
             enabled=bool(gemini_key),
             is_default=(settings.VIDEO_PROVIDER == "gemini-omni-1.2-flash"),
-            sends_data_externally=True,
+            **_capabilities("gemini-omni-1.2-flash"),
             max_clip_seconds=15.0,
             disabled_reason=None
             if gemini_key
@@ -74,12 +75,21 @@ async def get_providers(user: User = Depends(require_user)):
                 location="local",
                 enabled=True,
                 is_default=(settings.VIDEO_PROVIDER == "mock"),
-                sends_data_externally=False,
+                **_capabilities("mock"),
                 max_clip_seconds=None,
                 disabled_reason=None,
             )
         )
     return providers
+
+
+def _capabilities(name: str) -> dict[str, bool]:
+    """Capability flags read from the provider class, never from the engine name (FR-016)."""
+    cls = get_provider_class(name)
+    return {
+        "sends_data_externally": bool(getattr(cls, "sends_data_externally", False)),
+        "requires_photos": bool(getattr(cls, "requires_photos", False)),
+    }
 
 
 @router.get("/jobs", response_model=list[JobSummary])
@@ -113,11 +123,24 @@ async def create_job(
     external_consent: Annotated[bool, Form()] = False,
     include_all_photos: Annotated[bool, Form()] = False,
     image_alt_texts: Annotated[str | None, Form()] = None,
+    transition: Annotated[str | None, Form()] = None,
+    transition_seconds: Annotated[float | None, Form()] = None,
     csrf_check: None = Depends(require_csrf),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
     clean_scenario = scenario.strip() if scenario and scenario.strip() else None
+
+    # Render options (feature 002, FR-042). Validated before any file is stored.
+    try:
+        render_options = parse_render_options(
+            {"transition": transition, "transition_seconds": transition_seconds}
+        )
+    except RenderOptionsError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "invalid_render_option", "message": e.message},
+        )
 
     # Output options validation (FR-014, US5)
     if seconds_per_shot < 1.0 or seconds_per_shot > 10.0:
@@ -194,9 +217,9 @@ async def create_job(
             },
         )
 
-    # Cloud consent check (FR-036)
+    # Cloud consent check (FR-036), decided by the provider's capability flag
     external_consent_at = None
-    if chosen_provider == "gemini-omni-1.2-flash":
+    if _capabilities(chosen_provider)["sends_data_externally"]:
         if not external_consent:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -320,6 +343,7 @@ async def create_job(
         external_consent_at=external_consent_at,
         planned_seconds=planned_seconds,
         unused_image_count=unused_image_count,
+        render_options=render_options.to_storage(),
         created_at=now,
         updated_at=now,
         expires_at=expires_at,
@@ -419,7 +443,39 @@ def get_job(job_id: str, user: User = Depends(require_user), db: Session = Depen
         created_at=job.created_at,
         expires_at=job.expires_at,
         shots=shot_outs,
+        render_options=RenderOptions.from_storage(job.render_options).to_storage(),
+        scenes=_scene_outs(db, job),
+        text_assist_consented=job.text_assist_consent_at is not None,
+        subtitles=None,  # filled when subtitle files exist (US2/US3)
+        music=None,  # filled for library tracks (US4)
+        final_duration_seconds=job.final_duration_seconds,
     )
+
+
+def _scene_outs(db: Session, job: Job) -> list[SceneOut]:
+    """Scene list for the job detail, with photo note and alt text (feature 002)."""
+    images = {img.id: img for img in db.query(SourceImage).filter(SourceImage.job_id == job.id)}
+    scenes = db.query(Scene).filter(Scene.job_id == job.id).order_by(Scene.position).all()
+    outs: list[SceneOut] = []
+    for sc in scenes:
+        img = images.get(sc.source_image_id) if sc.source_image_id else None
+        outs.append(
+            SceneOut(
+                position=sc.position,
+                kind=sc.kind or "scene",
+                source_image_id=sc.source_image_id,
+                image_url=None,  # photo route arrives with the review screen (US2, T040)
+                note=img.note if img else None,
+                alt_text=img.alt_text if img else None,
+                excerpt=(sc.description or "")[:120] or None,
+                caption=sc.caption,
+                caption_source=sc.caption_source,
+                transition=sc.transition,
+                start_seconds=sc.start_seconds,
+                length_seconds=sc.length_seconds,
+            )
+        )
+    return outs
 
 
 @router.get("/jobs/{job_id}/events")

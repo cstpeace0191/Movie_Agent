@@ -1,3 +1,4 @@
+import mimetypes
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -87,6 +88,10 @@ def health():
         "queue": "idle",
     }
 
+
+# Windows can register .js as text/plain; browsers then refuse to run the module bundle.
+mimetypes.add_type("text/javascript", ".js")
+mimetypes.add_type("text/css", ".css")
 
 # Server static files (serves built React bundle copied to server/app/static)
 server_static_dir = Path(__file__).resolve().parent / "static"

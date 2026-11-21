@@ -97,7 +97,8 @@ CMD ["uvicorn", "server.app.main:app", "--host", "0.0.0.0", "--port", "8000", "-
 # Dedicated stage for running the Celery pipeline worker.
 ###################################################
 FROM backend-base AS worker
-CMD ["celery", "-A", "server.worker.celery_app", "worker", "--concurrency=1", "-l", "info"]
+# Consumes both queues when run alone; compose.yaml splits them into two services.
+CMD ["celery", "-A", "server.worker.celery_app", "worker", "-Q", "generation,planning", "--concurrency=1", "-l", "info"]
 
 ###################################################
 # Stage: test

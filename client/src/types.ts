@@ -64,8 +64,43 @@ export interface Provider {
   enabled: boolean;
   is_default: boolean;
   sends_data_externally: boolean;
+  requires_photos?: boolean;
   max_clip_seconds?: number | null;
   disabled_reason?: string | null;
+}
+
+/** Scene transition styles (feature 002, FR-042). Order is the order shown in the UI. */
+export const TRANSITIONS = [
+  'none',
+  'fade',
+  'fade_black',
+  'fade_white',
+  'dissolve',
+  'slide_left',
+  'slide_right',
+  'slide_up',
+  'slide_down',
+  'wipe_left',
+  'circle_open',
+  'zoom_in',
+  'auto',
+] as const;
+
+export type Transition = (typeof TRANSITIONS)[number];
+
+export interface SceneInfo {
+  position: number;
+  kind: 'scene' | 'title' | 'ending';
+  source_image_id?: string | null;
+  image_url?: string | null;
+  note?: string | null;
+  alt_text?: string | null;
+  excerpt?: string | null;
+  caption?: string | null;
+  caption_source?: string | null;
+  transition?: string | null;
+  start_seconds?: number | null;
+  length_seconds?: number | null;
 }
 
 export interface Shot {
@@ -90,6 +125,9 @@ export interface Job {
   created_at: string;
   expires_at: string;
   shots?: Shot[] | null;
+  render_options?: { transition?: Transition; transition_seconds?: number } & Record<string, unknown>;
+  scenes?: SceneInfo[] | null;
+  final_duration_seconds?: number | null;
 }
 
 export interface SSEProgressEvent {

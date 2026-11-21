@@ -98,6 +98,13 @@ any background; bundling the font makes Korean rendering independent of the host
 (`ffmpeg -filters | grep subtitles`). If the static `imageio-ffmpeg` binary lacks it, install a distro
 FFmpeg in the image.
 
+**VERIFY 1 result (2026-11-21, T005)**: Dev machine (Windows) has no FFmpeg on PATH; the pipeline
+now falls back to the `imageio-ffmpeg` 0.8.1 bundled binary (FFmpeg 9.0.2). Its `-filters` list has
+`subtitles`, `ass`, `xfade`, `acrossfade`, `zoompan`, `loudnorm`, `drawtext`, and its build config has
+`--enable-libass --enable-libfreetype --enable-libharfbuzz --enable-fontconfig`. The Docker image
+installs Debian's `ffmpeg` package, which is normally built with libass, but the image was not built
+and checked in this run.
+
 **Alternatives**: `drawtext` per caption (rejected: no ASS styling reuse, fragile escaping of Korean
 text); WebVTT (deferred: easy to add from the same cue list).
 
@@ -124,6 +131,12 @@ against SC-011, without code changes.
 **VERIFY 2**: confirm the exact structured-output call (`client.messages.parse(...)` binding and
 parameter names) against the installed `anthropic` SDK version before writing `captions.py`; upgrade
 the pin in `pyproject.toml` if the installed version predates it.
+
+**VERIFY 2 result (2026-11-21, T006)**: `uv.lock` pins `anthropic` 2.11.0. Checked by introspection:
+`client.messages.parse` exists; `client.messages.create` accepts `output_config`;
+`client.beta.messages.create` accepts `fallbacks`; `client.beta.messages.parse` exists. No pin change
+is needed. The exact structured-output argument (`output_format=` on `parse`) is to be confirmed
+against the SDK docs when `captions.py` is written (US2).
 
 **Alternatives**: One request per photo (rejected: 100 requests for 100 photos, slower and costlier);
 local VLM such as Qwen2.5-VL (deferred: needs GPU memory that LTX already uses); free-form text output

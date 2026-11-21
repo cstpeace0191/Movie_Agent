@@ -41,7 +41,12 @@ cd ..
 fastapi dev --port 8000
 
 # 2. Celery Worker (in a separate terminal)
-celery -A server.worker.celery_app worker --pool=solo --concurrency=1 -l info
+# GPU generation queue (one job at a time)
+celery -A server.worker.celery_app worker -Q generation --pool=solo --concurrency=1 -l info
+
+# 2b. Planning queue (caption drafts, verification e-mail, retention sweep) in another terminal.
+#     On a single dev machine you can instead run one worker for both: -Q generation,planning
+celery -A server.worker.celery_app worker -Q planning --pool=solo --concurrency=1 -l info
 
 # 3. Celery Beat Scheduler (retention cleanup)
 celery -A server.worker.celery_app beat -l info

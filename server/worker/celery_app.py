@@ -19,6 +19,15 @@ celery_app.conf.update(
     broker_connection_max_retries=1,
     redis_socket_connect_timeout=0.5,
     redis_socket_timeout=0.5,
+    # Feature 002 (research R8): GPU generation and light planning work use separate queues so
+    # caption drafts never wait behind a long generation job.
+    task_default_queue="generation",
+    task_routes={
+        "run_job": {"queue": "generation"},
+        "draft_captions_task": {"queue": "planning"},
+        "expire_old_jobs_task": {"queue": "planning"},
+        "send_verification_email_task": {"queue": "planning"},
+    },
     beat_schedule={
         # Hourly retention sweep (R12, T083)
         "hourly-retention-sweep": {

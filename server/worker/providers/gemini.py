@@ -5,6 +5,8 @@ from server.worker.providers.base import ProviderError, ShotRequest, ShotResult
 
 class GeminiVideoProvider:
     name: str = "gemini-omni-1.2-flash"
+    requires_photos: bool = False
+    sends_data_externally: bool = True
 
     def __init__(self, api_key: str | None = None):
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")

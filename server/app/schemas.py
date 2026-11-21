@@ -87,6 +87,7 @@ class ProviderOut(BaseModel):
     enabled: bool
     is_default: bool
     sends_data_externally: bool
+    requires_photos: bool = False
     max_clip_seconds: float | None = None
     disabled_reason: str | None = None
 
@@ -112,6 +113,35 @@ class JobSummary(BaseModel):
     expires_at: datetime
 
 
+class SceneOut(BaseModel):
+    """One scene on the job timeline (feature 002 contract delta)."""
+
+    position: int
+    kind: str = "scene"
+    source_image_id: str | None = None
+    image_url: str | None = None
+    note: str | None = None
+    alt_text: str | None = None
+    excerpt: str | None = None
+    caption: str | None = None
+    caption_source: str | None = None
+    transition: str | None = None
+    start_seconds: float | None = None
+    length_seconds: float | None = None
+
+
+class SubtitleLinks(BaseModel):
+    srt_url: str | None = None
+    ass_url: str | None = None
+
+
+class MusicCredit(BaseModel):
+    title: str
+    license_name: str | None = None
+    license_url: str | None = None
+    attribution: str | None = None
+
+
 class JobOut(BaseModel):
     id: str
     status: str
@@ -124,3 +154,10 @@ class JobOut(BaseModel):
     created_at: datetime
     expires_at: datetime
     shots: list[ShotOut] | None = None
+    # Feature 002
+    render_options: dict = {}
+    scenes: list[SceneOut] | None = None
+    text_assist_consented: bool = False
+    subtitles: SubtitleLinks | None = None
+    music: MusicCredit | None = None
+    final_duration_seconds: float | None = None
