@@ -197,6 +197,8 @@ A user chooses the video engine for each job: the local LTX-2.3 engine (the defa
 
 - **FR-030**: System MUST require a user to log in before creating, viewing, or downloading any job.
 - **FR-031**: System MUST show each user only the jobs and videos they created. System MUST NOT reveal another user's jobs, videos, or their existence through any screen, list, or link.
+- **FR-039**: Client UI MUST support real-time bilingual language selection (Korean and English) toggled from the header, persisting the choice across sessions.
+- **FR-040**: System MUST provide a Google-style white responsive authentication UI. Registration MUST validate username, email, and phone number availability/uniqueness in real time (rejecting duplicates with 409 Conflict), collect country, dispatch a 6-digit confirmation code via a Python mail system (FastAPI / Celery / aiosmtpd server on port 1025 with In-App Mailbox API and optional external SMTP relay), and upon successful code verification display "인증되었습니다" / "You are Verified" and automatically redirect to the sign-in page after 2 seconds.
 
 **Length limits**
 

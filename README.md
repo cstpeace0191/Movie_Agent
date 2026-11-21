@@ -4,8 +4,8 @@ Movie Maker is an AI-powered movie and video generation web service that turns s
 
 ## Architecture
 
-- **Backend**: Python 3.11, FastAPI, SQLAlchemy 2.0 (MySQL 9.3 / SQLite), Celery 5 (Redis broker), Argon2id session authentication + CSRF protection, FFmpeg video processing pipeline.
-- **Frontend / Client**: React 18 + TypeScript SPA bundled with Vite, conforming to WCAG 2.2 AA accessibility standards.
+- **Backend**: Python 3.11, FastAPI, SQLAlchemy 2.0 (MySQL 9.3 / SQLite), Celery 5 (Redis broker), Argon2id session authentication + CSRF protection, built-in Python `aiosmtpd` SMTP mail server system (port 1025) with Celery async email worker, In-App Mailbox API, FFmpeg video processing pipeline.
+- **Frontend / Client**: React 18 + TypeScript SPA bundled with Vite, conforming to WCAG 2.2 AA accessibility standards. Features Korean/English bilingual interface, Google-style white responsive authentication UI with real-time uniqueness validation for username, email, and phone number, 6-digit email verification with live In-App Mailbox & SMTP delivery, success notification ("인증되었습니다 / You are Verified"), and automatic 2-second redirect to login.
 - **Video Engines**:
   - `ltx-2.3`: Local ComfyUI GPU provider (default).
   - `gemini-omni-1.2-flash`: Google Gemini cloud provider with explicit data disclosure & consent gating.

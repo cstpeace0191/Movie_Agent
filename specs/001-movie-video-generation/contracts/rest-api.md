@@ -19,13 +19,62 @@ retention status (FR-034). Base path: `/api`. Format: JSON unless noted.
 
 ## Authentication
 
+### GET /api/auth/check-username
+
+Public. Checks if a desired username is valid and available.
+
+Query: `?username=<string>`
+
+- `200`: `{"available": true|false, "message": "string"}`
+
 ### POST /api/auth/register
 
-Request: `{"username": "string", "password": "string"}`. Password minimum 12 characters (proposed default).
+Request: `{"username": "string", "password": "string", "country": "string?", "phone": "string?", "email": "string?"}`. Password minimum 12 characters.
 
-- `201`: `{"id", "username"}`. Does not log the user in.
+- `201`: `{"id", "username", "email", "country", "phone", "email_verified", "verification_required", "debug_code"}`. Sends a 6-digit verification code to the registered email address.
 - `409 username_taken`
-- `422 validation_failed` (username or password rule violated; message names the rule)
+- `409 email_taken`: Email is already registered
+- `409 phone_taken`: Phone number is already registered
+- `422 validation_failed` (username, password, or email rule violated; message names the rule)
+
+### POST /api/auth/verify-email
+
+Public. Verifies the 6-digit code sent to the user's email address upon registration.
+
+Request: `{"username": "string", "code": "string"}`
+
+- `200`: `{"success": true, "message_ko": "인증되었습니다", "message_en": "You are Verified"}`
+- `400 invalid_verification_code`: Invalid or expired verification code
+- `404 user_not_found`
+
+### POST /api/auth/resend-code
+
+Public. Resends a fresh 6-digit verification code to the user's email address.
+
+Request: `{"username": "string"}`
+
+- `200`: `{"success": true, "message": "Verification code resent successfully", "email": "string", "code": "string"}`
+- `400 no_email`: No email registered for this user
+- `404 user_not_found`
+
+## Mail System (aiosmtpd & In-App Mailbox)
+
+### GET /api/mail/inbox
+
+Public. Fetches received emails processed by the Python aiosmtpd mail server.
+
+Query: `?email=<string?>`
+
+- `200`: `[{"id", "recipient", "sender", "subject", "body_text", "verification_code", "created_at"}]`
+
+### GET /api/mail/latest
+
+Public. Fetches the latest email and verification code for a specific recipient.
+
+Query: `?email=<string>`
+
+- `200`: `{"id", "recipient", "sender", "subject", "body_text", "verification_code", "created_at"}`
+- `404 email_not_found`
 
 ### POST /api/auth/login
 

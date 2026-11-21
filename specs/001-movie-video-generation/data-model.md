@@ -22,6 +22,12 @@ User 1 ──< Job 1 ──< SourceImage
 | id | UUID | Primary key |
 | username | string | Unique, 3–32 chars, letters/digits/underscore, case-insensitive uniqueness |
 | password_hash | string | argon2id hash; never returned by any API |
+| country | string? | Country name or ISO code |
+| phone | string? | Phone number; checked for uniqueness on registration |
+| email | string? | Verified email address; unique, checked for uniqueness on registration |
+| email_verified | boolean | True once email confirmation code is verified |
+| verification_code | string? | 6-digit verification code |
+| verification_expires_at | datetime? | Code expiration timestamp (15 minutes) |
 | created_at | datetime | Set on creation |
 
 Owns: Session, Job. A user sees only their own jobs (FR-030, FR-031).
