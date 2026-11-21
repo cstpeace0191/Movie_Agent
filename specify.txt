@@ -1,0 +1,557 @@
+================================================================================
+ Movie Maker - 시나리오 / 정지 이미지 기반 동영상 생성 서비스
+ 통합 명세 (specify.txt) v0.3   (작성일: 2026-11-21)
+================================================================================
+
+0. 문서 정보
+--------------------------------------------------------------------------------
+0.1 변경 이력
+  v0.1 (2026-11-20) spec.txt. 입력 3모드, VideoProvider, 샷 단위 생성/연결,
+                    인증·메일·다국어 UI 추가.
+  v0.2 (2026-11-21) spec2.txt. 편집/표현 기능(전환, 캡션, 자막, 오디오,
+                    스토리보드 편집) 추가. 다른 저장소(Movie_Maker: Wan/ComfyUI,
+                    compose.py) 기준으로 작성됨.
+  v0.3 (2026-11-21) 본 문서. spec.txt + spec2.txt 병합, 이 저장소 구현에 맞게 수정.
+       - 엔진: Wan 2.1 기본 -> LTX-2.3(로컬, 기본) / Gemini Omni 1.2 Flash(클라우드) / mock
+       - 요구사항 번호: specs/001 의 FR-001~FR-040 유지, 신규는 FR-041 부터
+       - 데이터 모델: Job / Scene / Shot / SourceImage 분리 구조에 맞춰 신규 필드 배치
+       - 파이프라인: split / mapping / frames / join / progress 모듈 기준으로 확장 위치 지정
+       - 샷 길이 5~10초 제약, 3분 상한, 2일 보관, 1회 재시도 등 기존 규칙과 정합
+       - 구현 현황과 명세 간 차이를 16장 "미결/검토 사항"으로 정리
+
+0.2 문서 관계
+  - 본 문서는 제품 수준의 상위 명세다. Spec Kit 산출물은 기능(feature) 단위로
+    여기서 파생된다.
+      릴리스 1 = specs/001-movie-video-generation/ (구현됨)
+      릴리스 2 = 7.2 절 -> specs/002-transitions-captions-music/ (2026-11-21 생성, Draft)
+  - 개발 원칙(코드품질, 테스트우선, 접근성, 성능)은 .specify/memory/constitution.md 를
+    따른다. 본 문서와 충돌하면 constitution 이 우선한다.
+  - API 세부 계약은 specs/<feature>/contracts/rest-api.md, 엔진 계약은
+    contracts/video-provider.md 가 최종본이다. 본 문서 9장은 요약이다.
+
+0.3 표기
+  [구현] 현재 코드에 있음   [R2] 릴리스 2 신규   [R3] 릴리스 3 이후   [VERIFY] 확인 필요
+
+1. 개요
+--------------------------------------------------------------------------------
+1.1 목적
+  로그인한 사용자가 (a) 텍스트 시나리오(프롬프트), (b) 정지 이미지(사진), 또는
+  (a)+(b)를 입력하면, 캡션과 오디오가 포함된 동영상(MP4)을 생성해 주는
+  클라이언트-서버 웹 서비스를 제공한다.
+
+1.2 릴리스 범위
+  릴리스 1 [구현] : 입력 3모드, 장면 분해, 사진-장면 매핑, 샷 생성(재시도 1회),
+                    순서대로 연결, 진행률(SSE), 작업 목록/삭제/취소, 보관 기간,
+                    인증(이메일 6자리 코드), 인앱 메일함, 한/영 UI, 엔진 선택과
+                    클라우드 엔진 동의.
+  릴리스 2 [R2]   : 타임라인 합성기, 장면 전환, 사진별 안내 프롬프트 -> 캡션,
+                    자막(SRT/ASS/번인), slideshow 엔진, 배경음악.
+  릴리스 3 [R3]   : TTS 내레이션과 덕킹, 단어 하이라이트 자막, 비율 프리셋,
+                    스토리보드 검토-수정-렌더, 샷 재생성, 템플릿.
+
+2. 용어
+--------------------------------------------------------------------------------
+  Job          사용자 1회 요청. 입력, 옵션, 상태, 최종 영상을 가진다.
+  SourceImage  업로드 사진 1장. 순서(position), 대체 텍스트(alt text), [R2] 안내 메모.
+  Scene        시나리오 분해 결과 1개 장면. 설명(영상 프롬프트), 길이, 매핑된 사진.
+               [R2] 캡션, 내레이션, 전환, 모션, 타임라인 위치.
+  Shot         Scene 1개를 엔진으로 생성한 클립 1개. 상태, 시도 횟수, 클립 경로.
+  Provider     영상 생성 엔진 어댑터 (VideoProvider 프로토콜).
+  Timeline     [R2] 장면별 시작/길이/전환/자막/오디오 위치를 계산한 결과.
+  계획 길이    planned_seconds = Σ Scene.duration_seconds (전환 겹침 차감 전).
+
+3. 입력 모드
+--------------------------------------------------------------------------------
+  - TEXT_ONLY   : 시나리오만 -> 장면 분해 -> 장면별 T2V
+                  (chain_frames=on 이면 2번째 장면부터 이전 샷 마지막 프레임으로 I2V)
+  - IMAGE_ONLY  : 사진만     -> 사진 1장당 장면 1개, 기본 모션 프롬프트로 I2V
+                  [R2] 사진별 안내 메모가 있으면 그것으로 모션 프롬프트/캡션 생성,
+                       slideshow 엔진 선택 시 GPU 없이 Ken Burns 영상.
+  - TEXT_IMAGE  : 시나리오 + 사진 -> n번째 사진을 n번째 장면에 매핑해 I2V.
+                  남는 장면은 chain_frames 규칙(FR-009), 남는 사진은 미사용 개수 보고(FR-010).
+
+4. 영상 엔진 및 오픈소스
+--------------------------------------------------------------------------------
+4.1 엔진 (도입 전 최신 버전/라이선스 재확인 필수, constitution Technical Constraints)
+  | id                     | 위치  | 모드      | 샷 길이 | 상태
+  |------------------------|-------|-----------|---------|-------------------------------------
+  | ltx-2.3                | 로컬  | T2V, I2V  | 5~10초  | 기본. ComfyUI 경유, RTX 4090(24GB).
+  |                        |       |           |         | [VERIFY] 가중치 라이선스, VRAM/정밀도,
+  |                        |       |           |         | 워크플로 JSON. 현재 어댑터는 연결 확인 후
+  |                        |       |           |         | 미구현 오류를 반환(16장 #1).
+  | gemini-omni-1.2-flash  | 클라우드| T2V, I2V | 5~15초  | 데이터 외부 전송 고지·동의 필수(FR-036).
+  |                        |       |           |         | 현재 어댑터는 실제 호출 미구현(16장 #1).
+  | mock                   | 로컬  | T2V, I2V  | 임의    | 개발/테스트 전용. 개발 모드에서만 노출.
+  | slideshow [R2]         | 로컬  | 이미지만  | 5~10초  | FFmpeg Ken Burns/패닝. GPU 불필요.
+
+  대체 후보: Wan 2.1/2.2 (Apache 2.0, LTX 라이선스 불가 시 1순위 대체),
+             CogVideoX, FramePack(장편 I2V).
+  사용 금지: HunyuanVideo (라이선스가 한국/EU/영국 제외 -> 국내 서비스 기본값 불가).
+
+4.2 파이프라인 구성 요소
+  | 역할                      | 채택 / 후보
+  |---------------------------|--------------------------------------------------
+  | 추론 실행 / 워크플로      | ComfyUI (API 모드) [구현: workflows/ltx_*.json]
+  | 시나리오 -> 장면 분해     | Claude API (claude-haiku-5-5) [구현], 실패 시 문단 분해
+  | 캡션 작성 / 이미지 분석   | [R2] Claude API (vision), 로컬 대안 Qwen2.5-VL
+  | 키프레임 이미지 생성      | [R3] FLUX.1 [schnell] (LTX 가 T2V 를 직접 지원하므로 선택)
+  | 인물 일관성               | [R3] IP-Adapter, PuLID, LoRA
+  | 깊이 추정 (2.5D 패럴랙스) | [R3] Depth Anything V2 Small (Apache 2.0)
+  | 피사체/얼굴 검출 (크롭)   | [R2~R3] MediaPipe (Apache 2.0), OpenCV
+  | TTS (한국어)              | [R3] MeloTTS (MIT), CosyVoice 2 (Apache)
+  | 단어 타이밍               | [R3] faster-whisper
+  | 프레임 보간 / 업스케일    | [R3] RIFE, Real-ESRGAN
+  | 편집 / 합성               | FFmpeg [구현: concat]. [R2] xfade, acrossfade,
+  |                           | subtitles(libass), sidechaincompress, loudnorm
+  | 배경음악                  | [R2] 저작권 무료 음원 라이브러리(라이선스 기록).
+  |                           | MusicGen 은 가중치 CC-BY-NC -> 상업 사용 불가
+  | 한글 자막 폰트            | [R2] Noto Sans KR / Pretendard (OFL)
+  | 메일                      | aiosmtpd 내장 SMTP(포트 1025) [구현], 외부 SMTP 선택
+
+5. 시스템 아키텍처
+--------------------------------------------------------------------------------
+  [Client: React 18 + TypeScript (Vite) SPA, 한/영 i18n]
+     │  REST (세션 쿠키 + CSRF 헤더) + SSE (진행률)
+     ▼
+  [API Server: FastAPI]
+     ├─ DB: SQLite(개발 기본) / MySQL 9.3(docker compose)   ※ PostgreSQL 전환은 16장 #9
+     ├─ Storage: ./storage/jobs/<job_id>/ (로컬)  ※ MinIO/S3 전환은 R3
+     ├─ 내장 메일 서버: aiosmtpd :1025 -> sent_emails 테이블 -> 인앱 메일함 API
+     │  작업 큐잉
+     ▼
+  [Broker: Redis 7] ←→ [Celery Worker (GPU 노드, --pool=solo, concurrency=1)]
+                     ←→ [Celery Beat: 매시 정각 보관 기간 만료 정리]
+
+  워커 파이프라인 (server/worker/tasks.py: run_job)
+    1. 계획      split.py(장면 분해) + mapping.py(사진-장면 매핑)   ※ API 접수 시 수행 [구현]
+                 [R2] captions.py: 사진별 안내 메모/이미지 -> 캡션·내레이션·모션 프롬프트
+                 [R3] review=true 면 status=planned 로 정지, 사용자 수정 대기
+    2. 샷 생성   장면마다 provider.generate(), 실패 시 1회 재시도 [구현]
+                 chain_frames: frames.py 로 이전 샷 마지막 프레임 추출 [구현]
+                 [R3] 샷 캐시(cache_key)로 변경 없는 샷 재사용
+    3. 오디오    [R2] 배경음악 준비  [R3] TTS 내레이션 -> 장면 길이 보정
+    4. 타임라인  [R2] timeline.py: 6장 규칙으로 장면 위치 계산, Scene 에 기록
+    5. 합성      [구현] join.py: concat(스트림 복사, 실패 시 재인코딩)
+                 [R2] compose.py: Timeline -> FFmpeg filter graph (정규화/전환/자막/오디오)
+                      -> final.mp4 (+ subtitles.srt / .ass)
+
+  설계 원칙
+  - 엔진은 VideoProvider 프로토콜과 registry 로만 접근한다. 엔진 이름은
+    worker/providers 밖에 나오지 않는다(FR-016). 클라이언트는 GET /api/providers 목록만 쓴다.
+  - 샷 단위 생성 후 연결: 엔진 1회 생성 길이(5~10초) 한계를 넘기 위함.
+  - 생성은 항상 비동기 작업. API 는 작업 ID 를 즉시 반환한다(FR-024).
+  - [R2] 시간 계산은 timeline.py 한 곳에서만 한다. compose/자막/오디오는 Timeline 값만 쓴다.
+  - [R2] 생성(비싼 단계)과 합성(싼 단계)을 분리한다. 캡션/전환/음악만 바뀌면
+    샷을 재생성하지 않고 재합성만 한다.
+
+6. 타임라인 모델 [R2]
+--------------------------------------------------------------------------------
+6.1 계산 규칙
+  - 장면 i 의 길이 d_i = min(Shot 실측 길이, Scene.duration_seconds).
+    (ShotResult.duration_seconds 는 파일에서 측정한 값이다.)
+  - 장면 i 로 들어오는 전환 길이 t_i: 장면 0 은 0, transition=none 이면 0.
+    t_i = min(transition_seconds, d_{i-1}/2, d_i/2).
+  - 시작 시각: s_0 = 0,  s_i = s_{i-1} + d_{i-1} - t_i
+  - 최종 길이: T = s_last + d_last  (= Σd_i - Σt_i, 계획 길이보다 짧거나 같다)
+  - 자막 큐 i: [s_i + t_i/2, s_{i+1} + t_{i+1}/2), 마지막 큐는 T 까지.
+  - 오디오: 내레이션 i 는 s_i + t_i 에서 시작. 배경음악은 0~T 전체.
+  - 타이틀/엔딩 카드(FR-049)도 장면 1개로 취급한다.
+  - FR-032(3분 상한)는 계획 길이(Σ Scene.duration_seconds, 카드 포함)로 판정한다.
+6.2 합성 그래프 (FFmpeg)
+  - 입력 정규화: scale/pad(fit) 또는 crop(fill) -> setsar=1 -> fps -> format=yuv420p
+    -> trim=duration=d_i -> settb=AVTB.   ※ FR-013 을 이 단계에서 보장한다.
+  - 연결: t_i>0 이면 xfade(transition, duration=t_i, offset=s_i),
+          t_i=0 이면 concat(n=2). 장면마다 섞어 쓸 수 있다.
+  - 자막: SRT/ASS 생성 후 subtitles 필터로 번인(옵션). 폰트 경로는 server/assets/fonts.
+  - 오디오: 내레이션 adelay 배치 -> 배경음악 aloop/atrim/afade -> sidechaincompress(덕킹)
+    -> amix -> loudnorm(-14 LUFS). 오디오 소스가 없으면 오디오 트랙을 만들지 않는다.
+
+7. 기능 요구사항
+--------------------------------------------------------------------------------
+7.1 릴리스 1 [구현]  (원문: specs/001-movie-video-generation/spec.md)
+  입력
+    FR-001 시나리오, 사진, 또는 둘 다로 작업 생성.
+    FR-002 둘 다 없으면 거부(400 no_input).
+    FR-003 사진 JPG/PNG/WebP, 장당 20MB 이하.
+    FR-004 작업당 사진 1~100장. 초과 시 한도를 밝혀 거부.
+    FR-037 사진마다 대체 텍스트(최대 500자) 입력·저장.
+  장면 분해
+    FR-005 시나리오 -> 순서 있는 장면 목록(설명, 길이).
+    FR-006 고급 분해(LLM) 불가/실패 시 문단 분해로 대체하고 작업은 계속.
+    FR-007 시나리오의 어떤 부분도 말없이 누락하지 않는다.
+  사진 매핑
+    FR-008 n번째 사진 -> n번째 장면.
+    FR-009 장면이 더 많으면: chain_frames=off 는 마지막 사용 사진, on 은 이전 샷 마지막 프레임.
+    FR-010 사진이 더 많으면 미사용 사진 수를 알리고 작업 완료.
+    FR-011 사진만 있으면 사진 1장당 샷 1개, 기본 모션 설명 사용.
+  생성/연결/엔진
+    FR-012 장면마다 샷 1개 생성, 순서대로 연결해 MP4 1개.
+    FR-013 연결 전 모든 샷을 같은 해상도·프레임레이트로 정규화.  (16장 #2)
+    FR-014 해상도, 샷당 길이, fps 설정. 미설정 시 기본값(832x480, 5초, 16fps).
+    FR-015 샷마다 이전 샷 마지막 프레임 이어 쓰기 여부(chain_frames) 선택.
+    FR-016 엔진 교체는 설정만으로(코드 변경 없음).
+    FR-035 작업마다 활성 엔진 중 선택(LTX-2.3 기본, Gemini). 키보드 조작 가능.
+    FR-036 클라우드 엔진 제출 전 외부 전송을 텍스트로 고지, 명시적 동의, 동의 시각 기록.
+  상태/진행률
+    FR-017 상태: queued, running, succeeded, failed, expired.  ([R3] planned 추가, FR-057)
+    FR-018 진행률 0~100 정수 + 짧은 단계 메시지.
+    FR-019 진행률을 새로고침 없이 푸시(SSE).
+    FR-020 페이지를 떠났다 돌아와도 상태 유지.
+  결과
+    FR-021 성공 시 MP4 다운로드.
+    FR-022 샷 목록(원 장면 발췌, 상태) 표시.
+    FR-023 내 작업 목록, 최신순.
+    FR-038 보관 기한 전 내 작업 삭제. queued/running 은 삭제 불가.
+    (취소) POST /api/jobs/{id}/cancel 로 queued/running 작업 중지 [구현, spec.md 미반영: 16장 #5]
+  처리/신뢰성
+    FR-024 백그라운드 생성, 제출 즉시 작업 ID 반환.
+    FR-025 작업당 시간 제한(기본 30분), 초과 시 failed.
+    FR-026 생성 자원당 작업 1개씩, 나머지는 대기열.
+    FR-027 실패 시 어느 샷이 실패했는지 알림.
+    FR-033 샷 실패 시 1회 자동 재시도, 재시도도 실패해야 작업 실패.
+    FR-032 계획 길이 3분 초과 작업은 생성 전에 한도와 계획 길이를 밝혀 거부.
+    FR-034 작업 생성 2일 후 사진·샷·최종 영상 영구 삭제(expired).
+  접근성
+    FR-028 작업 생성·진행·결과 기능을 키보드만으로 사용 가능.
+    FR-029 오류는 텍스트로, 색에만 의존하지 않음.
+  계정/UI
+    FR-030 작업 생성·조회·다운로드 전 로그인 필수.
+    FR-031 본인 작업만 보이고, 남의 작업은 존재 여부도 노출하지 않음(404).
+    FR-039 헤더에서 한/영 실시간 전환, 선택 유지.
+    FR-040 Google 스타일 흰색 반응형 인증 화면. 아이디·이메일·전화번호 실시간 중복 검사(409),
+           국가/전화번호/이메일 입력, 6자리 이메일 인증 코드(인앱 메일함 + SMTP),
+           성공 시 "인증되었습니다 / You are Verified" 표시 후 2초 뒤 로그인 화면.
+
+7.2 릴리스 2 [R2]  (spec2 F-10~F-19 를 이 저장소 기준으로 재번호)
+  장면 구성/전환
+    FR-041 Timeline: 6.1 규칙으로 장면 시작/길이/전환/자막 큐를 계산해 Scene 에 기록.
+           합성은 Timeline 기반 compose 로 수행하며 FR-013 정규화를 포함한다.
+           기존 join.py 의 concat 결과와 전환 없음(none) 설정의 결과가 같아야 한다.
+    FR-042 장면 전환: transition = none | fade | fadeblack | fadewhite | dissolve |
+           slideleft | slideright | slideup | slidedown | wipeleft | circleopen | zoomin | auto.
+           작업 기본값 + 장면별 지정. auto 는 목록 순환. transition_seconds 기본 0.5초(0.1~2.0).
+    FR-043 slideshow 엔진: 정지 사진에 motion 적용
+           (zoom_in, zoom_out, pan_left, pan_right, pan_up, pan_down, auto).
+           VideoProvider 계약 테스트를 통과해야 한다(constitution II).
+           사진이 없는 장면(TEXT_ONLY)은 지원하지 않으며, 이 엔진 선택 시 해당 작업을 422 로 거부한다.
+  캡션/자막
+    FR-044 사진별 안내 메모: 업로드 사진마다 짧은 설명(note, 최대 500자)을 입력할 수 있다.
+           note 는 대체 텍스트(FR-037)와 별개다. note 가 비어 있으면 alt text 를 힌트로 쓰고,
+           둘 다 비어 있으면 이미지 분석으로 대체한다.
+    FR-045 캡션 생성: LLM 이 note(+시나리오, +이미지)로 장면별
+           {caption(화면 자막 1~2줄), narration(읽을 문장), description(영상 프롬프트)} 생성.
+           caption_tone = info | emotional | humor | vlog | ad.
+           입력에 없는 사실을 지어내지 않는다. LLM 실패 시 note/alt text 를 그대로 캡션으로 쓴다(FR-006 과 같은 원칙).
+    FR-046 외부 전송 고지: 캡션 생성이나 장면 분해에 외부 LLM(Claude API)을 쓰고
+           사진 또는 시나리오를 보내는 경우, FR-036 과 같은 방식으로 고지하고 동의를 받는다.
+           동의하지 않으면 규칙 기반(문단 분해, note 그대로 사용)으로 처리한다.
+    FR-047 자막 출력: SRT(필수), ASS(스타일 포함) 생성. burn_captions=true 면 영상에 번인.
+           내레이션이 있는 영상은 자막을 반드시 제공한다(constitution III).
+    FR-048 자막 스타일: caption_style = {font, size, color, outline, box, position(top|bottom|auto)}.
+           본문 대비 4.5:1 이상을 보장하는 기본값(외곽선 또는 반투명 박스).
+    FR-049 타이틀/엔딩 카드: title, ending_text(선택)를 첫/끝 장면으로 추가. 계획 길이에 포함.
+  오디오
+    FR-050 배경음악: bgm = 업로드 파일(mp3/wav/m4a, 30MB 이하) | 내장 라이브러리 id | none.
+           영상 길이에 맞춰 반복/자르기, 시작/끝 페이드, bgm_volume(0~1, 기본 0.3).
+           업로드 음원도 FR-034 보관 기간에 따라 삭제한다.
+    FR-051 음량 정규화: 최종 오디오 loudnorm. 오디오 소스가 없으면 무음 트랙을 넣지 않는다.
+  캡션 검토 (2026-11-21 clarify 결정, R3 FR-057 의 일부를 앞당김)
+    FR-064 캡션이 있는 작업은 제출 후 백그라운드에서 캡션 초안을 쓰고(status=drafting)
+           status=awaiting_review(검토 대기)로 멈춘다. (R3 의 planned 상태는 이 상태로 대체 예정)
+           사용자는 장면별 캡션을 확인·수정한 뒤 확정하며, 확정해야 생성 대기열에 들어간다.
+           검토 대기 작업은 대기열 자리를 차지하지 않고, 취소·삭제 가능하며, 보관 기한에 삭제된다.
+           캡션 외 장면 수정(순서·삭제·설명·길이·전환)과 완료 후 수정은 R3.
+
+7.3 릴리스 3 [R3]  (spec2 F-13, F-20~F-31)
+    FR-052 TTS 내레이션: tts_voice(none 이면 비활성), 언어, 속도. 장면별 narration 을 음성으로.
+           TtsProvider 추상화(VideoProvider 와 같은 방식, 계약 테스트 필수).
+    FR-053 길이 자동 보정: duration = max(요청 길이, 음성 길이 + 0.5초).
+           엔진 최대 길이(LTX 10초, Gemini 15초)를 넘으면 장면을 나누어 내레이션을 분배한다.
+           보정은 샷 생성 전에 하고, 보정 후 계획 길이로 FR-032 를 다시 판정한다.
+    FR-054 덕킹: 내레이션 구간에서 배경음악 자동 감쇠(ducking=true).
+    FR-055 단어 하이라이트 자막: faster-whisper 단어 타이밍 -> ASS 카라오케(옵션).
+    FR-056 화면 비율 프리셋: aspect = 16:9 | 9:16 | 1:1 | 4:5 | custom -> width/height 결정.
+           비율이 다른 사진은 fit(레터박스/블러 배경) 또는 fill(피사체 중심 크롭).
+           엔진 해상도 제약(배수)을 따른다([VERIFY] research 항목 8).
+    FR-057 2단계 실행: review=true 면 계획 후 status=planned 로 멈춘다. render 요청 시 생성 시작.
+           planned 작업도 FR-034 보관 기간 대상이다.
+    FR-058 장면 수정: planned 상태에서 순서 변경, 삭제, description/caption/narration/duration/
+           transition/motion 수정.
+    FR-059 샷 재생성: 지정 샷만 다시 생성(seed 변경 가능). 나머지는 캐시 사용.
+    FR-060 재합성: 생성 파라미터(description, 입력 이미지, duration, motion, seed, provider, 해상도, fps)가
+           같은 샷은 재생성하지 않는다(cache_key = 파라미터 해시). 캡션/전환/음악만 바꾸면 재합성만 한다.
+    FR-061 템플릿/프리셋: preset 하나로 transition, caption_style, bgm, caption_tone, aspect 일괄 적용.
+           개별 옵션이 우선.
+    FR-062 사진 순서 추천: EXIF 촬영 시각/파일명 기준 자동 정렬(옵션).
+    FR-063 비트 싱크: 배경음악 비트에 맞춰 전환 시점 조정(옵션).
+
+8. 성공 기준
+--------------------------------------------------------------------------------
+  릴리스 1 (specs/001 SC-001~SC-008)
+    SC-001 새 작업 시작부터 진행 화면까지 1분 이내(문서 없이).
+    SC-002 정상 조건(동시 사용자 5명 이하, 생성 자원 1개)에서 유효 요청의 95% 이상 성공.
+    SC-003 생성 중 최소 10초마다 진행률 갱신.
+    SC-004 업로드 완료 후 1초 이내 접수 응답.
+    SC-005 생성·진행·다운로드를 키보드만으로 완료.
+    SC-006 사용자 90%가 기본 옵션으로 첫 시도에 첫 영상 생성.
+    SC-007 실패 시 사용자 90%가 표시된 메시지만으로 원인 설명 가능.
+    SC-008 설정만으로 엔진 교체, 애플리케이션 변경 없음.
+  릴리스 2 (specs/002-transitions-captions-music/spec.md 가 최종본)
+    SC-009 [R2] 사진 10장 + 메모로 전환·캡션·배경음악이 들어간 영상을 slideshow 엔진만으로
+           생성 엔진 없는 서버에서 성공시킬 수 있다(GPU 없이 전 흐름 검증).
+    SC-010 [R2] 자막 큐 시각이 영상 장면 경계와 0.1초 이내로 일치한다.
+    SC-011 [R2] 캡션 50개 이상 검토 시 입력에 없는 사실을 말하는 캡션 0개, 톤 일치 90% 이상.
+    SC-012 [R2] 전환·캡션·음악 추가로 인한 작업 완료 시간 증가 10% 이하.
+    SC-013 [R2] 메모를 입력한 사용자 90%가 문서 없이 첫 시도에 캡션·전환·음악 설정 완료.
+    SC-014 [R2] 이 릴리스의 모든 새 선택 항목을 키보드만으로 조작 가능.
+    SC-015 [R2] 사진 20장 이하 작업은 제출 후 1분 이내에 캡션 초안 검토 가능.
+  릴리스 3
+    SC-016 [R3] 캡션/전환/음악만 바꾼 재합성은 샷 재생성 없이 1분 영상(1080p) 기준 60초 이내.
+    SC-017 [R3] 내레이션이 있는 모든 결과 영상에 자막 파일이 제공된다(100%).
+
+9. API 명세 (요약. 최종본은 contracts/rest-api.md)
+--------------------------------------------------------------------------------
+9.1 규약 [구현]
+  - 인증: 세션 쿠키 movie_session (HttpOnly, SameSite=Lax). 공개 엔드포인트는
+    register, login, check-username, verify-email, resend-code, health, mail/*.
+  - CSRF: POST/DELETE ([R2~R3] PATCH 포함)는 X-CSRF-Token 헤더 필수.
+  - 오류: {"error": {"code": "...", "message": "..."}}. 남의 리소스는 404 not_found.
+  - 시각: ISO 8601 UTC.
+
+9.2 인증 / 메일 [구현]
+  GET  /api/auth/check-username?username=   -> {available, message}
+  POST /api/auth/register                   -> 201 {id, username, email, country, phone,
+                                               email_verified, verification_required, debug_code}
+                                               409 username_taken|email_taken|phone_taken, 422
+  POST /api/auth/verify-email {username, code} -> {success, message_ko, message_en}
+  POST /api/auth/resend-code {username}     -> {success, message, email, code}
+  POST /api/auth/login                      -> {id, username, csrf_token} + 쿠키, 401
+  POST /api/auth/logout                     -> 204
+  GET  /api/auth/me                         -> {id, username, csrf_token}
+  GET  /api/mail/inbox?email=               -> [MailMessage]
+  GET  /api/mail/latest?email=              -> MailMessage, 404
+  GET  /api/mail/{mail_id}                  -> MailMessage
+  ※ debug_code, resend-code 의 code, 공개 메일함은 개발 환경 전용이어야 한다(16장 #7).
+
+9.3 엔진 / 작업 [구현]
+  GET  /api/providers           -> [{id, label, location, enabled, is_default,
+                                    sends_data_externally, max_clip_seconds, disabled_reason}]
+  POST /api/jobs                multipart/form-data
+       scenario, images[], image_alt_texts(JSON 배열),
+       width=832, height=480, seconds_per_shot=5(5~10), fps=16,
+       provider(기본=서버 설정), chain_frames=true, external_consent=false
+       -> 201 Job(요약)
+       400 no_input|too_many_images|unsupported_file_type, 413 file_too_large,
+       422 too_long|unknown_provider|consent_required, 403 csrf_failed
+  GET  /api/jobs                -> [JobSummary] 최신순
+  GET  /api/jobs/{id}           -> Job (shots 포함)
+  GET  /api/jobs/{id}/events    -> SSE: progress / shot / done
+  GET  /api/jobs/{id}/video     -> video/mp4 (Range 지원), 409 not_ready|failed, 404
+  POST /api/jobs/{id}/cancel    -> {status, message}
+  DELETE /api/jobs/{id}         -> 204, 409 job_running
+  POST /api/system/shutdown     -> {status, message}   ※ 권한 제한 필요(16장 #6)
+  GET  /api/health              -> {status, provider, queue}
+
+9.4 추가 [R2]
+  POST /api/jobs 추가 필드
+       image_notes(JSON 배열, i번째 = images[i] 의 안내 메모, 각 500자 이하)   FR-044
+       transition="none", transition_seconds=0.5, motion="auto"             FR-042, FR-043
+       caption_tone, burn_captions=false, caption_style(JSON)                FR-045, FR-047, FR-048
+       title, ending_text                                                    FR-049
+       bgm(file) 또는 bgm_id, bgm_volume=0.3                                 FR-050
+       llm_consent=false                                                     FR-046
+       provider 에 "slideshow" 추가                                          FR-043
+       신규 오류: 422 slideshow_needs_images, 413 audio_too_large, 400 unsupported_audio_type
+  GET  /api/jobs/{id}/subtitles?format=srt|ass  -> text/plain; 409 not_ready, 404   FR-047
+  GET  /api/music               -> [{id, title, mood, duration, license}]           FR-050
+  Job 응답 추가: subtitles_url, final_duration_seconds, scenes[].caption
+
+9.5 추가 [R3]
+  POST /api/jobs 추가 필드: aspect, fit_mode, tts_voice, ducking=true, preset, review=false
+  GET   /api/jobs/{id}/scenes                   -> [Scene]
+  PATCH /api/jobs/{id}/scenes                   -> planned 상태에서만, 그 외 409    FR-058
+  POST  /api/jobs/{id}/render                   -> planned -> queued              FR-057
+  PATCH /api/jobs/{id}                          -> 렌더 옵션 변경 후 재합성        FR-060
+  POST  /api/jobs/{id}/shots/{position}/regenerate {seed?}                         FR-059
+  GET   /api/presets, GET /api/voices
+  SSE: planned 상태 도달 시 event: done {status: "planned"} 후 종료.
+  상태 전이: queued -> running -> (planned -> queued -> running) -> succeeded | failed | expired
+  queued/running 중 수정·재생성·재합성 요청은 409 job_running.
+
+10. 데이터 모델
+--------------------------------------------------------------------------------
+10.1 현재 [구현]  (server/app/models.py)
+  User        id, username(+username_lower), password_hash(Argon2id), country, phone, email,
+              email_verified, verification_code, verification_expires_at, created_at
+  Session     token_hash, user_id, csrf_token, created_at, last_seen_at
+  Job         id, owner_id, input_mode, scenario, status, progress, message, failure_reason,
+              width, height, seconds_per_shot, fps, chain_frames, provider, external_consent_at,
+              planned_seconds, unused_image_count, final_video_path,
+              created_at, updated_at, expires_at
+  Scene       id, job_id, position, description, duration_seconds, source_image_id, split_method
+  Shot        id, job_id, scene_id, position, status(pending|generating|succeeded|failed),
+              attempts, clip_path, error_message
+  SourceImage id, job_id, position, media_type, size_bytes, alt_text, storage_path, used
+  SentEmail   id, recipient, sender, subject, body_text, verification_code, status, created_at
+
+10.2 추가 [R2]
+  SourceImage + note (String 500)                                     FR-044
+  Scene       + caption (Text), narration (Text)                      FR-045
+              + transition (nullable, null=작업 기본값), motion (nullable)  FR-042, FR-043
+              + start_seconds, end_seconds (Timeline 결과)            FR-041
+              + kind (scene | title | ending)                         FR-049
+              split_method 값 추가: llm_caption
+  Job         + render_options (JSON): transition, transition_seconds, motion, caption_tone,
+                burn_captions, caption_style, title, ending_text, bgm_id, bgm_volume
+              + bgm_path, subtitles_path, final_duration_seconds, llm_consent_at
+  ※ 렌더 옵션은 늘어날 것이므로 개별 컬럼 대신 JSON 1개로 묶는다. 기존 생성 옵션 컬럼은 유지.
+
+10.3 추가 [R3]
+  Scene       + narration_audio_path
+  Shot        + seed, cache_key
+  SourceImage + exif_taken_at
+  Job         + review, status 값 planned 추가,
+                render_options 에 aspect, fit_mode, tts_voice, ducking, preset 추가
+
+11. 비기능 요구사항
+--------------------------------------------------------------------------------
+11.1 성능 (constitution IV)
+  - 생성 외 API 응답 p95 300ms 이하(기준 부하: 동시 사용자 5명).
+  - 접수 응답 1초 이내(SC-004), 진행률 10초 이내 간격(SC-003).
+  - 모델은 1회 로드 후 재사용. 요청마다 로드 금지.
+  - plan.md 마다 변경 경로의 예산(p95, 메모리/VRAM, 출력 1초당 생성 시간)을 적는다.
+    예산 10% 초과 변경은 사유 없이 병합 금지.
+  - [R2] 재합성(전환/자막/음악)은 GPU 를 쓰지 않는다.
+11.2 신뢰성
+  - 작업 시간 제한 30분(TASK_TIME_LIMIT_SECONDS), soft limit 은 30초 전.
+  - 생성 자원 1개당 작업 1개(worker concurrency=1, Windows 는 --pool=solo).
+  - 샷 1회 자동 재시도. ProviderError.transient 로 일시/영구 오류 구분.
+11.3 보관/개인정보
+  - 작업 생성 2일 후 업로드 사진, 샷, 최종 영상, [R2] 자막·업로드 음원 삭제(매시 정리).
+  - [R2] 업로드 사진의 EXIF GPS 는 저장 시 제거([R3] EXIF 촬영 시각은 정렬용으로 별도 보관).
+  - 외부 서비스(클라우드 엔진, 외부 LLM)로 사용자 데이터를 보낼 때는 고지·동의 후에만(FR-036, FR-046).
+11.4 보안
+  - 비밀번호 12자 이상, Argon2id 해시. 세션 7일. CSRF 토큰.
+  - 비밀값(API 키, SESSION_SECRET)은 server/.env 로 관리, 저장소 커밋 금지.
+  - 개발용 기능(debug_code, 공개 메일함, mock 엔진, 종료 API)은 ENV=development 에서만.
+11.5 접근성 (constitution III, WCAG 2.2 AA)
+  - 모든 조작 키보드 가능, 접근 가능한 이름 필수. 본문 대비 4.5:1, 큰 글자/경계 3:1.
+  - 오류는 텍스트로, 색만으로 상태 전달 금지.
+  - 사진마다 대체 텍스트 입력 가능. 내레이션 영상은 자막 필수.
+  - UI 변경마다 자동 접근성 검사 + 키보드/스크린리더 수동 점검 1회.
+11.6 업로드 제한
+  - 이미지 jpg/png/webp 장당 20MB, 작업당 100장. [R2] 음원 mp3/wav/m4a 30MB.
+  - 계획 길이 180초 이하.
+
+12. UI 요구사항
+--------------------------------------------------------------------------------
+  [구현]
+  - 한/영 전환 토글(헤더), 선택 유지.
+  - 인증: Google 스타일 흰색 반응형 카드 폼, 실시간 중복 검사, 6자리 코드 인증,
+    인앱 메일함, 성공 메시지 후 2초 뒤 로그인 화면.
+  - 작업 생성 폼: 시나리오, 사진(대체 텍스트), 옵션, 엔진 선택(GET /api/providers),
+    클라우드 엔진 고지·동의.
+  - 진행 화면: 진행률, 단계 메시지, 샷 목록, 취소, 결과 재생/다운로드.
+  - 작업 목록: 최신순, 삭제.
+  [R2]
+  - 사진 미리보기마다 안내 메모 입력칸(대체 텍스트와 구분된 라벨).
+  - 전환 효과 / 모션 / 캡션 톤 / 자막 번인 / 자막 스타일 / 배경음악 선택.
+  - 외부 LLM 사용 고지·동의(FR-046).
+  - 결과 화면에 자막 파일 다운로드, 배경음악 라이선스 표기.
+  [R3]
+  - 스토리보드 편집 화면: 장면 카드(썸네일, 캡션, 내레이션, 길이, 전환), 키보드로 순서 변경,
+    샷 재생성 버튼, 렌더 버튼.
+  - 프리셋 선택, 비율 선택과 크롭 미리보기, 목소리 선택.
+
+13. 기술 스택
+--------------------------------------------------------------------------------
+  Server : Python 3.11 (uv, pyproject.toml), FastAPI, SQLAlchemy 2.0, Pydantic Settings
+  DB     : SQLite(개발) / MySQL 9.3(docker compose)
+  Queue  : Celery 5 + Redis 7, Celery Beat(보관 정리)
+  Mail   : aiosmtpd 내장 SMTP(1025), 선택적으로 외부 SMTP
+  Engine : ComfyUI + LTX-2.3, Gemini Omni 1.2 Flash, FFmpeg
+  LLM    : Anthropic Python SDK (장면 분해: claude-haiku-5-5), 미설정 시 규칙 기반
+  Client : React 18 + TypeScript, Vite (빌드 결과를 FastAPI 가 정적 서빙)
+  품질   : ruff check / ruff format --check, mypy, pytest(unit/contract/integration), GitHub Actions CI
+  배포   : Dockerfile(멀티 스테이지), compose.yaml(Traefik, MySQL, Redis)
+
+14. 디렉터리 구조
+--------------------------------------------------------------------------------
+  Movie_Agent/
+    specify.txt (본 문서), spec.txt, spec2.txt, constitution.txt, README.md, 수행방법.md
+    pyproject.toml, uv.lock, Dockerfile, compose.yaml, docker-compose.yml
+    .specify/      Spec Kit 설정, memory/constitution.md
+    specs/001-movie-video-generation/   spec, plan, tasks, research, data-model, contracts, checklists
+    server/
+      app/         main, config, db, models, schemas, storage, auth, email_sender, mail_server
+        api/       jobs.py, auth.py, mail.py
+        static/    클라이언트 빌드본
+      worker/      celery_app.py, tasks.py
+        pipeline/  split.py, mapping.py, frames.py, join.py, progress.py, ffmpeg.py
+                   timeline.py   [R2] Timeline 계산 (6.1)
+                   compose.py    [R2] Timeline -> filter graph (6.2), join.py 대체
+                   captions.py   [R2] 안내 메모/이미지 -> 캡션·내레이션·프롬프트
+                   subtitles.py  [R2] SRT/ASS 생성
+                   audio.py      [R2] 배경음악, [R3] 내레이션 믹싱·덕킹
+        providers/ base.py, registry.py, ltx.py, gemini.py, mock.py
+                   slideshow.py  [R2]
+        tts/       [R3] base.py, melotts.py
+      assets/      [R2] fonts/, music/(+license.json), [R3] presets/
+      workflows/   ltx_t2v.json, ltx_i2v.json
+    client/        package.json, vite.config.ts, src/(App.tsx, api.ts, types.ts, i18n.ts, main.tsx)
+    tests/         unit/, contract/(provider 계약), integration/
+                   [R2] unit/test_timeline.py, unit/test_subtitles.py,
+                        contract 에 slideshow 추가, integration/test_transitions_captions.py
+    storage/jobs/<job_id>/   업로드, 샷, final.mp4, [R2] subtitles.srt/.ass, bgm
+
+15. 로드맵
+--------------------------------------------------------------------------------
+  릴리스 1 (specs/001, 구현됨)
+    남은 일: 16장 #1(LTX/Gemini 실제 생성), #2(정규화), research VERIFY 항목.
+
+  릴리스 2 (specs/002 예정. 모두 mock/slideshow 로 GPU 없이 검증)
+    2-1 Timeline + compose 리팩터링 (FR-041). join.py 대체, FR-013 정규화 해결.
+    2-2 사진별 안내 메모 + 캡션 생성 + 외부 LLM 동의 (FR-044~FR-046)
+    2-3 장면 전환 (FR-042)
+    2-4 자막 SRT/ASS/번인, 스타일, 타이틀/엔딩 (FR-047~FR-049)
+    2-5 slideshow 엔진 (FR-043)
+    2-6 배경음악, 음량 정규화 (FR-050, FR-051)
+    각 단계는 constitution II 에 따라 실패하는 테스트부터 작성한다.
+
+  릴리스 3
+    3-1 TTS 내레이션 + 길이 보정 + 덕킹 (FR-052~FR-054)
+    3-2 단어 하이라이트 자막, 비율 프리셋/스마트 크롭 (FR-055, FR-056)
+    3-3 2단계 실행, 장면 수정, 샷 재생성, 캐시 재합성 + 스토리보드 UI (FR-057~FR-060)
+    3-4 프리셋, 사진 순서 추천, 비트 싱크 (FR-061~FR-063)
+
+  이후
+    FLUX 키프레임, RIFE 보간, 2.5D 패럴랙스, 캐릭터 일관성, 다국어 자막 번역,
+    PostgreSQL/MinIO 전환, 관리자 권한.
+
+16. 미결 / 검토 사항 (2026-11-21 코드 확인 결과)
+--------------------------------------------------------------------------------
+  #1 LTX/Gemini 어댑터 미완성: ltx.py 는 ComfyUI 연결 확인 후 항상 ProviderError,
+     gemini.py 는 키 확인 후 항상 ProviderError 를 낸다. 현재 실제로 영상이 나오는 엔진은 mock 뿐이다.
+     또 tasks.resolve_provider 는 알 수 없는 엔진을 조용히 mock 으로 바꾼다(운영에서는 실패 처리 권장).
+  #2 FR-013 미충족 가능성: join.py 는 concat 스트림 복사(실패 시 재인코딩)만 하고
+     해상도·fps 정규화를 하지 않는다. 엔진마다 출력이 다르면 깨질 수 있다. -> R2 2-1 에서 해결.
+  #3 장면 분해 프롬프트가 "No narration" 으로 내레이션을 만들지 않는다. R2 FR-045 에서
+     출력 스키마를 {description, duration, caption, narration} 으로 확장해야 한다.
+  #4 외부 LLM 고지 누락: ANTHROPIC_API_KEY 가 있으면 시나리오가 Claude API 로 전송되지만
+     FR-036 은 영상 엔진만 다룬다. -> FR-046 으로 보완.
+  #5 취소 기능 불일치: cancel API 는 구현됐지만 contracts/rest-api.md 는 "Cancellation is not in
+     this release" 라고 적혀 있다. 취소된 작업은 failed + "Cancelled by user" 로 저장된다.
+     별도 상태(cancelled) 도입 여부 결정 필요.
+  #6 POST /api/system/shutdown 은 로그인한 아무 사용자나 서버를 종료할 수 있다.
+     개발 모드 전용 또는 관리자 전용으로 제한 필요.
+  #7 register 응답의 debug_code, resend-code 응답의 code, 공개 메일함 API 는 인증 코드를
+     노출한다. 운영 환경에서 비활성화 필요.
+  #8 Gemini 는 5~15초를 지원하지만 seconds_per_shot 검증은 5~10초다. 엔진별 범위 적용 여부 결정.
+  #9 DB: spec.txt 는 "MySQL -> PostgreSQL", 코드는 SQLite 기본 + MySQL 9.3 compose.
+     목표 DB 를 하나로 확정 필요.
+  #10 constitution.txt 는 요청 문장만 있고 실제 원칙은 .specify/memory/constitution.md 에 있다.
+     constitution.md 상단의 SYNC IMPACT REPORT 주석은 커밋 전 제거 대상이다.
+  #11 server/app/static/assets 에 이전 빌드 산출물이 여러 벌 남아 있다. 빌드 시 정리 필요.
+  #12 [VERIFY] LTX-2.3 가중치 라이선스(상업 사용, 매출 기준), MeloTTS/CosyVoice 라이선스,
+     내장 배경음악 라이선스, LTX/Gemini 해상도 배수 제약.
+================================================================================
