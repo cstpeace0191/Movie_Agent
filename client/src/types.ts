@@ -1,6 +1,54 @@
 export interface User {
   id: string;
   username: string;
+  email?: string | null;
+  country?: string | null;
+  phone?: string | null;
+  email_verified?: boolean;
+}
+
+export interface RegisterPayload {
+  username: string;
+  password: string;
+  country?: string;
+  phone?: string;
+  email?: string;
+}
+
+export interface RegisterResponse {
+  id: string;
+  username: string;
+  email?: string | null;
+  verification_required: boolean;
+  debug_code?: string | null;
+}
+
+export interface CheckUsernameResponse {
+  available: boolean;
+  message: string;
+}
+
+export interface VerifyEmailResponse {
+  success: boolean;
+  message_ko: string;
+  message_en: string;
+}
+
+export interface ResendCodeResponse {
+  success: boolean;
+  message: string;
+  email?: string | null;
+  code?: string | null;
+}
+
+export interface MailMessage {
+  id: string;
+  recipient: string;
+  sender: string;
+  subject: string;
+  body_text: string;
+  verification_code?: string | null;
+  created_at: string;
 }
 
 export interface LoginResponse {

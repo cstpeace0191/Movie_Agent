@@ -1,8 +1,24 @@
-import { LoginResponse, Provider, Job, ApiError } from './types';
+import {
+  LoginResponse,
+  Provider,
+  Job,
+  ApiError,
+  RegisterPayload,
+  RegisterResponse,
+  CheckUsernameResponse,
+  VerifyEmailResponse,
+  ResendCodeResponse,
+  MailMessage,
+} from './types';
 
 export async function getMe(): Promise<LoginResponse | null> {
   const res = await fetch('/api/auth/me');
   if (!res.ok) return null;
+  return res.json();
+}
+
+export async function checkUsernameAvailability(username: string): Promise<CheckUsernameResponse> {
+  const res = await fetch(`/api/auth/check-username?username=${encodeURIComponent(username)}`);
   return res.json();
 }
 
@@ -19,7 +35,7 @@ export async function loginUser(body: { username: string; password: string }): P
   return data;
 }
 
-export async function registerUser(body: { username: string; password: string }): Promise<void> {
+export async function registerUser(body: RegisterPayload): Promise<RegisterResponse> {
   const res = await fetch('/api/auth/register', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -29,6 +45,46 @@ export async function registerUser(body: { username: string; password: string })
   if (!res.ok) {
     throw new Error((data as ApiError).error?.message || 'Registration failed');
   }
+  return data;
+}
+
+export async function verifyEmailCode(username: string, code: string): Promise<VerifyEmailResponse> {
+  const res = await fetch('/api/auth/verify-email', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, code }),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error((data as ApiError).error?.message || 'Verification failed');
+  }
+  return data;
+}
+
+export async function resendVerificationCode(username: string): Promise<ResendCodeResponse> {
+  const res = await fetch('/api/auth/resend-code', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username }),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error((data as ApiError).error?.message || 'Failed to resend code');
+  }
+  return data;
+}
+
+export async function fetchLatestEmail(email: string): Promise<MailMessage | null> {
+  const res = await fetch(`/api/mail/latest?email=${encodeURIComponent(email)}`);
+  if (!res.ok) return null;
+  return res.json();
+}
+
+export async function fetchMailInbox(email?: string): Promise<MailMessage[]> {
+  const url = email ? `/api/mail/inbox?email=${encodeURIComponent(email)}` : '/api/mail/inbox';
+  const res = await fetch(url);
+  if (!res.ok) return [];
+  return res.json();
 }
 
 export async function logoutUser(csrfToken: string): Promise<void> {
