@@ -22,6 +22,7 @@ def test_defaults_match_data_model():
     assert opts.caption_box is True
     assert opts.title is None
     assert opts.ending_text is None
+    assert opts.video_filename is None
     assert opts.bgm_id is None
     assert opts.bgm_volume == 0.3
 
@@ -40,6 +41,7 @@ def test_valid_values_are_kept():
             "caption_color": "#00ff00",
             "title": "  Trip  ",
             "ending_text": "",
+            "video_filename": "  My Vacation  ",
         }
     )
     assert opts.transition == "fade"
@@ -47,6 +49,7 @@ def test_valid_values_are_kept():
     assert opts.caption_color == "#00ff00"
     assert opts.title == "Trip"
     assert opts.ending_text is None
+    assert opts.video_filename == "My Vacation"
 
 
 @pytest.mark.parametrize(
@@ -60,6 +63,7 @@ def test_valid_values_are_kept():
         ("caption_color", "#FFF"),
         ("title", "t" * 81),
         ("ending_text", "e" * 121),
+        ("video_filename", "v" * 121),
         ("transition", "spin"),
         ("motion", "orbit"),
         ("caption_tone", "angry"),
@@ -92,6 +96,26 @@ def test_all_transition_names_accepted():
     ]
     for name in names:
         assert parse_render_options({"transition": name}).transition == name
+
+
+def test_all_caption_positions_accepted():
+    positions = [
+        "top_left",
+        "top_center",
+        "top_right",
+        "middle_left",
+        "middle_center",
+        "middle_right",
+        "bottom_left",
+        "bottom_center",
+        "bottom_right",
+        "top",
+        "bottom",
+        "auto",
+        "none",
+    ]
+    for pos in positions:
+        assert parse_render_options({"caption_position": pos}).caption_position == pos
 
 
 def test_to_storage_round_trip():

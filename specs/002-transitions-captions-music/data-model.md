@@ -40,12 +40,13 @@ MusicTrack (file catalog: server/assets/music/library.json) ──? Job.render_o
 | captions | bool | false | When false: no drafting, no review, no subtitles |
 | caption_tone | enum | `informative` | `informative, emotional, humorous, travel_diary, advertisement` |
 | burn_captions | bool | false | |
-| caption_position | enum | `bottom` | `top, bottom, auto` (`auto` = bottom in this release) |
+| caption_position | enum | `bottom_center` | 9 positions: `top_left, top_center, top_right, middle_left, middle_center, middle_right, bottom_left, bottom_center, bottom_right, none` (legacy `top, bottom, auto` supported; extracted from photo description / alt_text) |
 | caption_size | enum | `medium` | `small, medium, large` |
 | caption_color | string | `#FFFFFF` | `#RRGGBB` |
 | caption_box | bool | true | Opaque box behind text |
 | title | string? | null | ≤ 80 chars, trimmed; empty = none |
 | ending_text | string? | null | ≤ 120 chars |
+| video_filename | string? | null | ≤ 120 chars, trimmed; custom display and download filename for output video |
 | bgm_id | string? | null | Must exist in library.json; mutually exclusive with uploaded `bgm_path` |
 | bgm_volume | float | 0.3 | 0.0–1.0 |
 

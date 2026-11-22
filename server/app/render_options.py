@@ -27,7 +27,21 @@ Transition = Literal[
 ]
 Motion = Literal["zoom_in", "zoom_out", "pan_left", "pan_right", "pan_up", "pan_down", "auto"]
 CaptionTone = Literal["informative", "emotional", "humorous", "travel_diary", "advertisement"]
-CaptionPosition = Literal["top", "bottom", "auto"]
+CaptionPosition = Literal[
+    "top_left",
+    "top_center",
+    "top_right",
+    "middle_left",
+    "middle_center",
+    "middle_right",
+    "bottom_left",
+    "bottom_center",
+    "bottom_right",
+    "top",
+    "bottom",
+    "auto",
+    "none",
+]
 CaptionSize = Literal["small", "medium", "large"]
 
 TRANSITIONS: tuple[str, ...] = get_args(Transition)
@@ -59,10 +73,11 @@ class RenderOptions(BaseModel):
     caption_box: bool = True
     title: str | None = Field(None, max_length=80)
     ending_text: str | None = Field(None, max_length=120)
+    video_filename: str | None = Field(None, max_length=120)
     bgm_id: str | None = None
     bgm_volume: float = Field(0.3, ge=0.0, le=1.0)
 
-    @field_validator("title", "ending_text", "bgm_id", mode="before")
+    @field_validator("title", "ending_text", "bgm_id", "video_filename", mode="before")
     @classmethod
     def _blank_to_none(cls, value: Any) -> Any:
         if isinstance(value, str):

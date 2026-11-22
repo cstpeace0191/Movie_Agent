@@ -26,8 +26,9 @@ Each item adds `requires_photos: bool`. New item:
 | captions | bool | false | FR-045 |
 | caption_tone | string | `informative` | |
 | burn_captions | bool | false | FR-047 |
-| caption_position / caption_size / caption_color / caption_box | string / string / string / bool | bottom / medium / #FFFFFF / true | FR-048 |
+| caption_position / caption_size / caption_color / caption_box | string / string / string / bool | bottom_center / medium / #FFFFFF / true | FR-048; 9 positions: `top_left`, `top_center`, `top_right`, `middle_left`, `middle_center`, `middle_right`, `bottom_left`, `bottom_center`, `bottom_right`, `none` (legacy `top`, `bottom`, `auto`) |
 | title / ending_text | string | none | FR-049; cards add 3 s each to planned length |
+| video_filename | string | none | Custom output filename (≤ 120 chars), downloaded as {video_filename}.mp4 |
 | bgm | file | none | MP3/WAV/M4A ≤ 30 MB (FR-050) |
 | bgm_id | string | none | From `GET /api/music` |
 | bgm_volume | float | 0.3 | 0–1 |

@@ -1,4 +1,4 @@
-import { TRANSITIONS, type Transition } from '../types';
+import { TRANSITIONS, CAPTION_POSITIONS, type Transition, type CaptionPosition } from '../types';
 import type { Translation } from '../i18n';
 
 export const TRANSITION_SECONDS_MIN = 0.1;
@@ -16,17 +16,21 @@ interface Props {
   t: Translation;
   transition: Transition;
   transitionSeconds: number;
+  captionPosition: CaptionPosition;
   onTransitionChange: (value: Transition) => void;
   onTransitionSecondsChange: (value: number) => void;
+  onCaptionPositionChange: (value: CaptionPosition) => void;
 }
 
-/** Render options for feature 002, User Story 1: scene transition style and length. */
+/** Render options for scene transitions and caption positions. */
 export function RenderOptions({
   t,
   transition,
   transitionSeconds,
+  captionPosition,
   onTransitionChange,
   onTransitionSecondsChange,
+  onCaptionPositionChange,
 }: Props) {
   const secondsError = transitionSecondsError(transitionSeconds, t);
   const lengthDisabled = transition === 'none';
@@ -73,6 +77,24 @@ export function RenderOptions({
               {secondsError}
             </p>
           )}
+        </div>
+        <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+          <label htmlFor="opt-caption-position">{t.captionPositionLabel}</label>
+          <select
+            id="opt-caption-position"
+            name="caption_position"
+            value={captionPosition}
+            onChange={(e) => onCaptionPositionChange(e.target.value as CaptionPosition)}
+          >
+            {CAPTION_POSITIONS.map((pos) => (
+              <option key={pos} value={pos}>
+                {t.captionPositions[pos] || pos}
+              </option>
+            ))}
+          </select>
+          <p id="opt-caption-position-hint" className="hint">
+            {t.captionPositionHint}
+          </p>
         </div>
       </div>
     </fieldset>

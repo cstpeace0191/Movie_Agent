@@ -88,6 +88,21 @@ export const TRANSITIONS = [
 
 export type Transition = (typeof TRANSITIONS)[number];
 
+export const CAPTION_POSITIONS = [
+  'top_left',
+  'top_center',
+  'top_right',
+  'middle_left',
+  'middle_center',
+  'middle_right',
+  'bottom_left',
+  'bottom_center',
+  'bottom_right',
+  'none',
+] as const;
+
+export type CaptionPosition = (typeof CAPTION_POSITIONS)[number];
+
 export interface SceneInfo {
   position: number;
   kind: 'scene' | 'title' | 'ending';

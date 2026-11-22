@@ -12,6 +12,7 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Query,
     Response,
     UploadFile,
     status,
@@ -24,7 +25,7 @@ from server.app.config import settings
 from server.app.db import SessionLocal, get_db
 from server.app.models import Job, Scene, Shot, SourceImage, User, utcnow, validate_alt_text
 from server.app.render_options import RenderOptions, RenderOptionsError, parse_render_options
-from server.app.schemas import JobOut, JobSummary, ProviderOut, SceneOut, ShotOut
+from server.app.schemas import JobOut, JobSummary, ProviderOut, SceneOut, ShotOut, SubtitleLinks
 from server.app.storage import (
     StorageValidationError,
     delete_job_media,
@@ -105,6 +106,7 @@ def list_jobs(user: User = Depends(require_user), db: Session = Depends(get_db))
             planned_seconds=j.planned_seconds,
             created_at=j.created_at,
             expires_at=j.expires_at,
+            render_options=j.render_options or {},
         )
         for j in jobs
     ]
@@ -121,10 +123,17 @@ async def create_job(
     provider: Annotated[str | None, Form()] = None,
     chain_frames: Annotated[bool, Form()] = True,
     external_consent: Annotated[bool, Form()] = False,
-    include_all_photos: Annotated[bool, Form()] = False,
+    include_all_photos: Annotated[bool, Form()] = True,
     image_alt_texts: Annotated[str | None, Form()] = None,
     transition: Annotated[str | None, Form()] = None,
     transition_seconds: Annotated[float | None, Form()] = None,
+    caption_position: Annotated[str | None, Form()] = None,
+    burn_captions: Annotated[bool | None, Form()] = None,
+    captions: Annotated[bool | None, Form()] = None,
+    caption_size: Annotated[str | None, Form()] = None,
+    caption_color: Annotated[str | None, Form()] = None,
+    caption_box: Annotated[bool | None, Form()] = None,
+    video_filename: Annotated[str | None, Form()] = None,
     csrf_check: None = Depends(require_csrf),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
@@ -132,10 +141,25 @@ async def create_job(
     clean_scenario = scenario.strip() if scenario and scenario.strip() else None
 
     # Render options (feature 002, FR-042). Validated before any file is stored.
+    render_dict: dict[str, Any] = {
+        "transition": transition,
+        "transition_seconds": transition_seconds,
+        "caption_position": caption_position,
+        "caption_size": caption_size,
+        "caption_color": caption_color,
+        "caption_box": caption_box,
+        "video_filename": video_filename,
+    }
+    if caption_position and caption_position != "none":
+        render_dict["captions"] = True
+        render_dict["burn_captions"] = True
+    elif burn_captions is not None:
+        render_dict["burn_captions"] = burn_captions
+    if captions is not None:
+        render_dict["captions"] = captions
+
     try:
-        render_options = parse_render_options(
-            {"transition": transition, "transition_seconds": transition_seconds}
-        )
+        render_options = parse_render_options(render_dict)
     except RenderOptionsError as e:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -370,14 +394,28 @@ async def create_job(
         db.add(src_row)
     db.commit()
 
+    # Map image_id -> alt text
+    image_alt_map = {uid: alt for uid, _, _, _, _, alt in uploaded_files_data if alt}
+
+    from server.worker.pipeline.mapping import DEFAULT_MOTION_PROMPT
+
     # Save scenes
     for s in scenes_data:
+        src_id = getattr(s, "source_image_id", None)
+        photo_alt = image_alt_map.get(src_id) if src_id else None
+        caption_text = (
+            photo_alt
+            if photo_alt
+            else (s.description if s.description and s.description != DEFAULT_MOTION_PROMPT else None)
+        )
         scene_row = Scene(
             job_id=job.id,
             position=s.position,
             description=s.description,
+            caption=caption_text,
+            caption_source="verbatim" if caption_text else None,
             duration_seconds=s.duration_seconds,
-            source_image_id=getattr(s, "source_image_id", None),
+            source_image_id=src_id,
             split_method=s.split_method,
         )
         db.add(scene_row)
@@ -446,7 +484,10 @@ def get_job(job_id: str, user: User = Depends(require_user), db: Session = Depen
         render_options=RenderOptions.from_storage(job.render_options).to_storage(),
         scenes=_scene_outs(db, job),
         text_assist_consented=job.text_assist_consent_at is not None,
-        subtitles=None,  # filled when subtitle files exist (US2/US3)
+        subtitles=SubtitleLinks(
+            srt_url=f"/api/jobs/{job.id}/subtitles?format=srt" if job.subtitles_srt_path else None,
+            ass_url=f"/api/jobs/{job.id}/subtitles?format=ass" if job.subtitles_ass_path else None,
+        ) if (job.subtitles_srt_path or job.subtitles_ass_path) else None,
         music=None,  # filled for library tracks (US4)
         final_duration_seconds=job.final_duration_seconds,
     )
@@ -503,18 +544,27 @@ async def get_job_events(
             status_val = curr.status
             progress_val = curr.progress
             msg_val = curr.message
+            fail_val = curr.failure_reason
             poll_db.close()
+
+            event_payload = {
+                "job_id": job_id,
+                "status": status_val,
+                "progress": progress_val,
+                "message": msg_val,
+                "failure_reason": fail_val,
+            }
 
             if status_val in ("succeeded", "failed"):
                 # Final state
-                yield f"event: progress\ndata: {json.dumps({'status': status_val, 'progress': progress_val, 'message': msg_val})}\n\n"
-                yield f"event: done\ndata: {json.dumps({'status': status_val, 'progress': progress_val, 'message': msg_val})}\n\n"
+                yield f"event: progress\ndata: {json.dumps(event_payload)}\n\n"
+                yield f"event: done\ndata: {json.dumps(event_payload)}\n\n"
                 break
 
             if progress_val != last_progress or status_val != last_status:
                 last_progress = progress_val
                 last_status = status_val
-                yield f"event: progress\ndata: {json.dumps({'status': status_val, 'progress': progress_val, 'message': msg_val})}\n\n"
+                yield f"event: progress\ndata: {json.dumps(event_payload)}\n\n"
             else:
                 yield ": heartbeat\n\n"
 
@@ -635,8 +685,47 @@ def get_job_video(job_id: str, user: User = Depends(require_user), db: Session =
             detail={"code": "not_ready", "message": "Video is not ready yet."},
         )
 
+    # Custom download filename from render_options
+    opts = job.render_options or {}
+    custom_name = opts.get("video_filename") or opts.get("title")
+    if custom_name and str(custom_name).strip():
+        safe_name = re.sub(r'[\\/*?:"<>|]', "", str(custom_name).strip()).rstrip(". ")
+        if not safe_name.lower().endswith(".mp4"):
+            download_name = f"{safe_name}.mp4"
+        else:
+            download_name = safe_name
+    else:
+        download_name = f"video_{job.id}.mp4"
+
     return FileResponse(
         path=job.final_video_path,
         media_type="video/mp4",
-        filename=f"video_{job.id}.mp4",
+        filename=download_name,
+    )
+
+
+@router.get("/jobs/{job_id}/subtitles")
+def get_job_subtitles(
+    job_id: str,
+    format: str = Query("srt", pattern=r"^(srt|ass)$"),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    job = db.query(Job).filter(Job.id == job_id, Job.owner_id == user.id).first()
+    if not job or job.status == "expired":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "not_found", "message": "Job not found."},
+        )
+    sub_path = get_subtitles_path(job.id, format)
+    if not sub_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "no_subtitles", "message": "Subtitles not found."},
+        )
+
+    return FileResponse(
+        path=str(sub_path),
+        media_type="text/plain; charset=utf-8",
+        filename=f"movie-{job.id}.{format}",
     )

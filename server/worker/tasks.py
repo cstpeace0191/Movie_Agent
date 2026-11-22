@@ -4,7 +4,12 @@ from pathlib import Path
 from server.app.db import SessionLocal
 from server.app.models import Job, Scene, Shot, SourceImage
 from server.app.render_options import RenderOptions
-from server.app.storage import delete_job_media, get_final_video_path, get_shot_path
+from server.app.storage import (
+    delete_job_media,
+    get_final_video_path,
+    get_shot_path,
+    get_subtitles_path,
+)
 from server.worker.celery_app import celery_app
 from server.worker.pipeline.compose import ClipInput, compose
 from server.worker.pipeline.frames import extract_last_frame
@@ -54,7 +59,7 @@ def run_job_sync(job_id: str) -> None:
         scenes = db.query(Scene).filter(Scene.job_id == job_id).order_by(Scene.position).all()
         if not scenes:
             update_job_progress(
-                db, job_id, status="failed", failure_reason="No scenes found for job"
+                db, job_id, status="failed", message="No scenes found", failure_reason="No scenes found for job"
             )
             return
 
@@ -150,6 +155,7 @@ def run_job_sync(job_id: str) -> None:
                     db,
                     job_id,
                     status="failed",
+                    message=f"Shot {i} failed",
                     failure_reason=f"Shot {i} failed: {last_error}",
                 )
                 return
@@ -161,7 +167,7 @@ def run_job_sync(job_id: str) -> None:
             final_duration = _compose_job(db, job, scenes, shot_paths, final_video_path)
         except Exception as e:  # noqa: BLE001 - any compose failure fails the job with a reason
             update_job_progress(
-                db, job_id, status="failed", failure_reason=f"Joining scenes failed: {e}"
+                db, job_id, status="failed", message="Joining scenes failed", failure_reason=f"Joining scenes failed: {e}"
             )
             return
 
@@ -196,7 +202,30 @@ def _compose_job(db, job: Job, scenes: list[Scene], shot_paths: list[Path], outp
         scene.length_seconds = round(placed.length_seconds, 3)
     db.commit()
 
-    compose(timeline, clips, job.width, job.height, job.fps, output)
+    subtitles_path = None
+    has_captions = any(s.caption and s.caption.strip() for s in scenes)
+    caption_pos = getattr(options, "caption_position", "bottom")
+    if has_captions and caption_pos != "none":
+        from server.worker.pipeline.subtitles import write_ass, write_srt
+
+        ass_path = get_subtitles_path(job.id, "ass")
+        srt_path = get_subtitles_path(job.id, "srt")
+        write_ass(timeline, scenes, options, job.width, job.height, ass_path)
+        write_srt(timeline, scenes, srt_path)
+        job.subtitles_ass_path = str(ass_path)
+        job.subtitles_srt_path = str(srt_path)
+        db.commit()
+        subtitles_path = ass_path
+
+    compose(
+        timeline,
+        clips,
+        job.width,
+        job.height,
+        job.fps,
+        output,
+        subtitles_path=subtitles_path,
+    )
     return round(probe_media(output).duration_seconds, 3)
 
 

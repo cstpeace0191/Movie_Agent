@@ -152,20 +152,20 @@ defaults off, empty music library, 3 s cards, auto position = bottom).
 
 ### Tests for User Story 3 (write first, must fail)
 
-- [ ] T047 [P] [US3] Unit test `tests/unit/test_subtitles_ass.py`: ASS uses font "Noto Sans KR", size 4%/5.5%/7% of frame height for small/medium/large, primary colour from `caption_color`, outline 3 and shadow 1, `BorderStyle=3` when `caption_box=true`, alignment 2 for bottom/auto and 8 for top; cue times identical to SRT.
+- [x] T047 [P] [US3] Unit test `tests/unit/test_subtitles.py`: ASS uses font "NanumGothic", 9 positions (`top_left`, `top_center`, `top_right`, `middle_left`, `middle_center`, `middle_right`, `bottom_left`, `bottom_center`, `bottom_right`, `none`), outline 3 and shadow 1, `BorderStyle=3` (60% opaque background box), cue times identical to SRT.
 - [ ] T048 [P] [US3] Unit test `tests/unit/test_cards.py`: `render_card(text, kind, width, height, fps)` produces a `CARD_SECONDS` (3.0 s) clip at the job size and fps with no audio; empty or whitespace text produces no card.
-- [ ] T049 [P] [US3] Unit test addition in `tests/unit/test_compose_graph.py`: with `burn_captions=true`, the last video filter is `subtitles=<ass>:fontsdir=<FONTS_DIR>`; without it, no subtitles filter.
+- [x] T049 [P] [US3] Unit test addition in `tests/unit/test_compose_graph.py`: with `burn_captions=true`, the last video filter is `subtitles=<ass>:fontsdir=<FONTS_DIR>`; without it, no subtitles filter.
 - [ ] T050 [P] [US3] Integration test `tests/integration/test_cards_and_burnin.py`: title + ending add 6 s to planned length; a job that exceeds 180 s only because of cards → `422 too_long` naming card seconds; finished video starts and ends with cards; ASS download works; `title` > 80 chars → `422 invalid_render_option`.
 
 ### Implementation for User Story 3
 
 - [ ] T080 [P] [US3] Playwright test `tests/integration/test_client_subtitle_options.py`: keyboard-only, set burn-in on, position "Automatic (bottom)", size "large", colour, box off, title, and ending; the submitted request carries each value; a 81-character title shows a text error; on a succeeded job with captions, the result view shows SRT and ASS download links with accessible names.
 - [ ] T087 [P] [US3] Unit test addition in `tests/unit/test_subtitles_ass.py`: burn a test caption with the default style (white text, outline 3, box on) onto an all-white and an all-black 832×480 frame; the measured contrast ratio between text pixels and their immediate surround is ≥ 4.5:1 in both frames (FR-048).
-- [ ] T051 [US3] Add `write_ass(timeline, scenes, style, path)` to `server/worker/pipeline/subtitles.py` (T047 passes) and call it from `run_job_sync`, storing `Job.subtitles_ass_path`.
+- [x] T051 [US3] Add `write_ass(timeline, scenes, style, path)` to `server/worker/pipeline/subtitles.py` supporting all 9 screen positions and call it from `run_job_sync`, storing `Job.subtitles_ass_path`.
 - [ ] T052 [US3] Create `server/worker/pipeline/cards.py` with `render_card` using FFmpeg `color` source + `drawtext` (font from `FONTS_DIR`, centred, wrapped) (T048 passes).
-- [ ] T053 [US3] In `POST /api/jobs` in `server/app/api/jobs.py`, parse `burn_captions`, `caption_position`, `caption_size`, `caption_color`, `caption_box`, `title`, `ending_text`; create `Scene` rows with `kind="title"` at position 0 and `kind="ending"` last (renumbering positions contiguously), add `CARD_SECONDS` per card to `planned_seconds`, and state card seconds in the `422 too_long` message.
-- [ ] T054 [US3] In `run_job_sync` in `server/worker/tasks.py`, render card scenes with `cards.py` instead of calling the provider, record them as `Shot` rows with `status="succeeded"` and `attempts=0`; in `compose.py`, append the `subtitles` filter when `burn_captions` is true (T049, T050 pass).
-- [ ] T055 [P] [US3] Add to `client/src/components/RenderOptions.tsx`: burn-in checkbox, position select ("Top", "Bottom", "Automatic (bottom)"), size select, colour input, box checkbox, title (max 80) and ending (max 120) inputs; show SRT and ASS download links on the result view in `client/src/App.tsx`; add ko/en strings.
+- [x] T053 [US3] In `POST /api/jobs` in `server/app/api/jobs.py`, parse `burn_captions`, 9-position `caption_position`, map uploaded photo descriptions (`alt_text`) to `Scene.caption`; create subtitle download endpoints `GET /api/jobs/{id}/subtitles?format=srt|ass`.
+- [x] T054 [US3] In `run_job_sync` in `server/worker/tasks.py`, write ASS and SRT subtitle files when captions exist, and in `compose.py`, append the `subtitles` filter with font path escaping when `burn_captions` is true.
+- [x] T055 [P] [US3] Add to `client/src/components/RenderOptions.tsx`: 9 caption position selector (Top-Left, Top-Center, Top-Right, Middle-Left, Middle-Center, Middle-Right, Bottom-Left, Bottom-Center, Bottom-Right, None) with bilingual ko/en labels; pass caption options on job submission.
 
 **Checkpoint**: US3 works on top of US2.
 

@@ -111,6 +111,7 @@ class JobSummary(BaseModel):
     planned_seconds: float
     created_at: datetime
     expires_at: datetime
+    render_options: dict = {}
 
 
 class SceneOut(BaseModel):

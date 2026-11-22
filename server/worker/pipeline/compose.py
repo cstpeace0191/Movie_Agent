@@ -57,6 +57,7 @@ def build_compose_command(
     height: int,
     fps: int,
     output_path: Path,
+    subtitles_path: Path | None = None,
 ) -> list[str]:
     """Build the FFmpeg command that renders ``timeline`` from ``clips`` to ``output_path``.
 
@@ -93,8 +94,8 @@ def build_compose_command(
         d = _num(scene.length_seconds)
         parts.append(
             f"[{i}:v]scale={width}:{height}:force_original_aspect_ratio=decrease,"
-            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={fps},format=yuv420p,"
-            f"trim=duration={d},setpts=PTS-STARTPTS,settb=AVTB[v{i}]"
+            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p,"
+            f"trim=duration={d},setpts=PTS-STARTPTS,settb=AVTB,fps={fps}[v{i}]"
         )
         if with_audio:
             src = silent_input.get(i, i)
@@ -119,6 +120,12 @@ def build_compose_command(
             if with_audio:
                 parts.append(f"[{audio_out}][a{i}]concat=n=2:v=0:a=1[ax{i}]")
         video_out, audio_out = f"vx{i}", f"ax{i}"
+
+    if subtitles_path and Path(subtitles_path).exists():
+        sub_str = Path(subtitles_path).resolve().as_posix().replace(":", r"\:")
+        fonts_dir = (Path(__file__).resolve().parent.parent.parent / "assets" / "fonts").resolve().as_posix().replace(":", r"\:")
+        parts.append(f"[{video_out}]subtitles={sub_str}:fontsdir={fonts_dir}[vsub]")
+        video_out = "vsub"
 
     args += ["-filter_complex", ";".join(parts), "-map", f"[{video_out}]"]
     if with_audio:
@@ -146,6 +153,7 @@ def compose(
     height: int,
     fps: int,
     output_path: Path,
+    subtitles_path: Path | None = None,
 ) -> Path:
     """Render the final video and atomically replace ``output_path``.
 
@@ -157,7 +165,9 @@ def compose(
     if temp_output.exists():
         temp_output.unlink()
 
-    cmd = build_compose_command(timeline, clips, width, height, fps, temp_output)
+    cmd = build_compose_command(
+        timeline, clips, width, height, fps, temp_output, subtitles_path=subtitles_path
+    )
     try:
         proc = subprocess.run(
             cmd,

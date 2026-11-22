@@ -26,6 +26,7 @@
 | Setup | T005 FFmpeg libass 확인(VERIFY 1) | **부분 완료**. 개발 PC는 확인했고, Docker 이미지는 빌드해서 확인하지 않았습니다. |
 | Foundational | T008–T019 렌더 옵션, probe, DB 컬럼 마이그레이션, 엔진 속성 플래그, 레지스트리, 큐 라우팅, 저장 경로, 작업 상세 응답 확장 | 완료 |
 | US1 | T020–T028 타임라인, 합성기, 워커·API 연결, `join.py` 제거, 클라이언트 전환 UI. T078 키보드 브라우저 테스트 | 완료 |
+| US3 | T002/T005/T047/T051/T053/T054/T055 자막 9개 지정 위치 표출, 사진 설명글 캡션 매핑, ASS/SRT 생성, NanumGothic 번들 폰트 및 60% 박스 번인 렌더링, 자막 다운로드 API | 완료 |
 
 ## 3. 주요 변경 사항
 
@@ -47,11 +48,31 @@
   - Dockerfile 기본 워커는 두 큐를 모두 처리합니다.
   - compose.yaml은 두 서비스로 나눴습니다.
   - README에 실행 방법을 반영했습니다.
+- `server/worker/pipeline/subtitles.py` (신규):
+  - 9개 화면 위치(`top_left`, `top_center`, `top_right`, `middle_left`, `middle_center`, `middle_right`, `bottom_left`, `bottom_center`, `bottom_right`, `none`)와 ASS 정렬(Numpad alignment 1~9)을 매핑합니다.
+  - SRT 및 번들 폰트(나눔고딕 NanumGothic)와 60% 반투명 박스(`BorderStyle=3`)를 적용한 스타일화된 ASS 자막 생성기를 구현했습니다.
+- `server/worker/pipeline/compose.py`: FFmpeg `subtitles` 필터를 필터그래프 끝단에 연결하여 지정 위치에 번인 자막을 렌더링합니다. Windows/Linux 경로 호환을 위한 드라이브 콜론 이스케이프(`\:`)를 처리합니다.
+- `server/app/api/jobs.py`:
+  - `POST /api/jobs`: 업로드된 사진 설명글(`alt_text`)을 각 장면의 자막(`Scene.caption`, `caption_source="verbatim"`)으로 자동 매핑합니다.
+  - `GET /api/jobs/{id}/subtitles?format=srt|ass`: 자막 파일 다운로드 엔드포인트를 추가했습니다.
+- `server/assets/fonts/`: CJK 문자 깨짐 방지를 위해 `NanumGothic.ttf` 및 `NotoSansKR-Regular.ttf` 번들 폰트를 추가했습니다.
 - `server/app/main.py`: **버그 수정**. Windows에서는 레지스트리 때문에 `.js` 파일이 `text/plain`으로 응답돼, 브라우저가 React 번들을 실행하지 않고 앱이 뜨지 않았습니다. 이제 `.js`와 `.css`의 MIME 유형을 명시적으로 등록합니다.
 
 ### 클라이언트
+- `client/src/components/PhotoList.tsx` (신규):
+  - 파일 추가 시 기존 사진을 덮어쓰지 않고 계속 누적(Append) 등록하는 다중 사진 목록 관리 컴포넌트입니다.
+  - 등록된 각 사진의 썸네일 미리보기, 장면 번호(#1, #2...), 파일명, 파일 용량을 시각적 카드로 표시합니다.
+  - 각 사진 카드마다 **`[🔄 사진 교체]`** 버튼이 제공되어 특정 사진만 손쉽게 새 이미지로 교체할 수 있습니다.
+  - 각 사진 카드마다 개별 캡션(자막) 텍스트를 입력 및 실시간 수정할 수 있으며, 재생 순서 변경(위로/아래로), 개별 삭제, 전체 삭제를 지원합니다.
+  - "➕ 사진 추가하기" 버튼을 통해 사진을 여러 번에 나누어 등록할 수 있습니다.
+- `client/src/App.tsx`:
+  - 동영상 제작 중 및 프리뷰 상태에서도 사진 목록과 캡션 입력 상태를 그대로 유지하여, 프리뷰를 확인한 뒤 각 정지 사진 교체나 캡션 수정을 거쳐 `[🎬 수정 내용으로 동영상 다시 제작]`할 수 있습니다.
+  - 프리뷰 영역에 `[✅ 제작 완료 및 새 작업 시작]` 버튼을 추가하여, 사용자가 동영상 제작을 최종 완료했을 때 폼과 사진 목록을 초기화하도록 개선했습니다.
+  - 사용자가 동영상 파일 이름(`video_filename`)을 직접 입력할 수 있도록 지원하며, 프리뷰 박스 및 보관함 목록에서 입력한 파일명(`{video_filename}.mp4`)으로 저장 및 표시됩니다.
 - `client/src/components/RenderOptions.tsx` (신규)
   - 전환 효과 선택(13종)과 길이 입력(0.1–2.0초)
+  - 9개 캡션 위치 선택(상단/중단/하단 × 좌측/중앙/우측, 없음) 드롭다운 추가
+  - 사진 설명글을 자막으로 자동 표출하는 안내 문구 및 한/영 다국어 지원
   - 범위를 벗어나면 텍스트 오류를 보여 주고 제출을 막습니다.
   - 대비는 카드 배경 기준으로 안내문 11.0:1, 오류 7.6:1입니다.
 - `App.tsx`, `types.ts`, `i18n.ts`(한·영 문자열), `style.css`

@@ -87,6 +87,16 @@ def test_single_clip():
     assert cmd[-1] == str(Path("/o.mp4"))
 
 
+def test_compose_with_subtitles_filter(tmp_path: Path):
+    sub = tmp_path / "test.ass"
+    sub.write_text("[Script Info]\n", encoding="utf-8")
+    tl = build_timeline([5.0], [None], "fade", 1.0)
+    cmd = build_compose_command(tl, [_clip("a", 5.0)], 832, 480, 16, Path("/o.mp4"), subtitles_path=sub)
+    graph = _graph(cmd)
+    assert "subtitles=" in graph
+    assert "fontsdir=" in graph
+
+
 def test_compose_runs_and_normalizes_mixed_clips(tmp_path: Path):
     """FR-013: clips of different size and fps become one size and fps; fade shortens the total."""
     import subprocess

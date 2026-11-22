@@ -155,17 +155,25 @@
        fit(레터박스/블러 배경) 또는 fill(스마트 크롭) 중 선택.
 
 5.3 캡션 / 자막 (v0.2, Phase 2)
-  F-14 사진별 안내 프롬프트: 업로드 이미지마다 사용자가 짧은 설명(captions[i])을
-       입력할 수 있다. 미입력 이미지는 이미지 분석으로 대체.
+  F-14 사진 목록, 사진별 캡션 및 프리뷰 기반 반복 수정: 다중 사진 선택 시 누적 등록되며, 등록된
+       사진 리스트를 썸네일·순서·파일명과 함께 시각적으로 제공한다. 각 사진마다 캡션(caption) 텍스트를 입력할 수 있으며,
+       개별 사진 교체(Replace Photo), 순서 변경(위/아래) 및 개별/전체 삭제를 지원한다.
+       동영상 생성 중 및 프리뷰 상태에서도 사진 목록과 캡션이 유지되어, 프리뷰 확인 후 사진이나 캡션을 교체하여
+       수정된 내용으로 동영상을 즉시 다시 제작할 수 있으며, 프리뷰의 [완료] 시점에 폼이 초기화된다.
   F-15 캡션 생성: LLM 이 안내 프롬프트(+이미지)를 바탕으로 샷별
        {caption(화면 자막, 1~2줄), narration(읽을 문장), prompt(모션/영상 프롬프트)}
        를 생성. caption_tone 옵션(info, emotional, humor, vlog, ad).
        사용자가 입력한 사실을 벗어난 내용은 만들지 않는다.
   F-16 자막 출력: SRT(필수) / ASS(스타일 포함) 파일 생성,
-       burn_captions=true 이면 영상에 번인.
-  F-17 자막 스타일: caption_style = {font, size, color, outline, box, position
-       (top|bottom|auto)}. auto 는 얼굴/피사체를 가리지 않는 위치.
-  F-18 타이틀/엔딩 카드: title, ending_text(선택) 를 첫/끝 장면으로 추가.
+       burn_captions=true 이면 영상에 번인. 각 사진 설명글(alt text / 안내 메모)을 자막(caption)으로 사용.
+  F-17 자막 스타일 및 9개 위치: caption_style = {font, size, color, outline, box, position}.
+       position 은 9개 지정 위치(상단 좌측 top_left, 상단 중앙 top_center, 상단 우측 top_right,
+       중단 좌측 middle_left, 중단 중앙 middle_center, 중단 우측 middle_right,
+       하단 좌측 bottom_left, 하단 중앙 bottom_center, 하단 우측 bottom_right, 없음 none)를 지원.
+       (하위 호환: top=top_center, bottom=bottom_center, auto=bottom_center).
+       나눔고딕(NanumGothic) 폰트와 반투명 박스(BorderStyle=3)를 기본 적용하여 가독성 4.5:1 확보.
+  F-18 타이틀/엔딩 카드 및 파일명: title, ending_text(선택) 를 첫/끝 장면으로 추가.
+       video_filename 옵션을 통해 제작된 동영상의 다운로드 파일명을 직접 지정 가능.
 
 5.4 오디오 (v0.2, Phase 2~3)
   F-19 배경음악: bgm = 업로드 파일 | 내장 라이브러리 id | none.

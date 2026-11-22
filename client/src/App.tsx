@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useRef, FormEvent, ChangeEvent } from 'react';
-import { Provider, Job, SSEProgressEvent, MailMessage, Transition } from './types';
+import React, { useState, useEffect, useRef, FormEvent } from 'react';
+import { Provider, Job, SSEProgressEvent, MailMessage, Transition, CaptionPosition } from './types';
 import { RenderOptions, transitionSecondsError } from './components/RenderOptions';
+import { PhotoList, PhotoItem } from './components/PhotoList';
 import {
   getMe,
   loginUser,
@@ -68,15 +69,16 @@ export const App: React.FC = () => {
 
   // Job creation state
   const [scenario, setScenario] = useState('');
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
-  const [altTexts, setAltTexts] = useState<string[]>([]);
-  const [includeAllPhotos, setIncludeAllPhotos] = useState(true);
+  const [videoFilename, setVideoFilename] = useState('');
+  const [photos, setPhotos] = useState<PhotoItem[]>([]);
+  const includeAllPhotos = true;
   const [width, setWidth] = useState(832);
   const [height, setHeight] = useState(480);
   const [secondsPerShot, setSecondsPerShot] = useState(3.0);
   const [fps, setFps] = useState(16);
   const [transition, setTransition] = useState<Transition>('none');
   const [transitionSeconds, setTransitionSeconds] = useState(0.5);
+  const [captionPosition, setCaptionPosition] = useState<CaptionPosition>('bottom_center');
   const [selectedProvider, setSelectedProvider] = useState('ltx-2.3');
   const [externalConsent, setExternalConsent] = useState(false);
   const [providers, setProviders] = useState<Provider[]>([]);
@@ -142,6 +144,7 @@ export const App: React.FC = () => {
     try {
       const list = await fetchJobs();
       setJobs(list);
+      setLastCompletedJobId((prev) => (prev && list.some((j) => j.id === prev && j.status === 'succeeded') ? prev : null));
     } catch {
       // ignore
     }
@@ -340,19 +343,78 @@ export const App: React.FC = () => {
     setCurrentUser(null);
     setCsrfToken(null);
     setAuthView('login');
+    setLastCompletedJobId(null);
+    setActiveJobId(null);
   };
 
-  // File selection
-  const handleFilesChange = (e: ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files ? Array.from(e.target.files) : [];
-    setSelectedFiles(files);
-    setAltTexts(new Array(files.length).fill(''));
+  // Photo selection & management
+  const handleAddPhotos = (newFiles: File[]) => {
+    const newItems: PhotoItem[] = newFiles.map((file) => ({
+      id: `${file.name}-${file.size}-${Date.now()}-${Math.random()}`,
+      file,
+      previewUrl: URL.createObjectURL(file),
+      caption: '',
+    }));
+    setPhotos((prev) => [...prev, ...newItems]);
   };
 
-  const handleAltTextChange = (index: number, val: string) => {
-    const next = [...altTexts];
-    next[index] = val;
-    setAltTexts(next);
+  const handleUpdateCaption = (index: number, caption: string) => {
+    setPhotos((prev) => {
+      const next = [...prev];
+      if (next[index]) {
+        next[index] = { ...next[index], caption };
+      }
+      return next;
+    });
+  };
+
+  const handleRemovePhoto = (index: number) => {
+    setPhotos((prev) => {
+      if (prev[index]) {
+        URL.revokeObjectURL(prev[index].previewUrl);
+      }
+      return prev.filter((_, idx) => idx !== index);
+    });
+  };
+
+  const handleReplacePhoto = (index: number, newFile: File) => {
+    setPhotos((prev) => {
+      const next = [...prev];
+      if (next[index]) {
+        URL.revokeObjectURL(next[index].previewUrl);
+        next[index] = {
+          ...next[index],
+          file: newFile,
+          previewUrl: URL.createObjectURL(newFile),
+        };
+      }
+      return next;
+    });
+  };
+
+  const handleMovePhoto = (index: number, direction: 'up' | 'down') => {
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    setPhotos((prev) => {
+      if (targetIndex < 0 || targetIndex >= prev.length) return prev;
+      const next = [...prev];
+      const [moved] = next.splice(index, 1);
+      next.splice(targetIndex, 0, moved);
+      return next;
+    });
+  };
+
+  const handleClearAllPhotos = () => {
+    photos.forEach((p) => URL.revokeObjectURL(p.previewUrl));
+    setPhotos([]);
+  };
+
+  const getDownloadFilename = (jobId: string, customName?: string | null) => {
+    const name = customName?.trim() || videoFilename.trim();
+    if (name) {
+      const clean = name.replace(/[\\/*?:"<>|]/g, '').trim();
+      return clean.toLowerCase().endsWith('.mp4') ? clean : `${clean}.mp4`;
+    }
+    return `movie_${jobId.slice(0, 8)}.mp4`;
   };
 
   // SSE tracking
@@ -370,12 +432,18 @@ export const App: React.FC = () => {
       try {
         const data: SSEProgressEvent = JSON.parse(e.data);
         setProgressBarWidth(data.progress);
-        setProgressStatus(`${data.message} (${data.progress}%)`);
         if (data.status === 'failed') {
+          setProgressStatus(`${data.message || 'Failed'} (${data.progress}%)`);
+          if (data.failure_reason) {
+            setGlobalError(data.failure_reason);
+          }
           setIsGenerating(false);
         } else if (data.status === 'succeeded') {
+          setProgressStatus(`${data.message} (${data.progress}%)`);
           setIsGenerating(false);
           setLastCompletedJobId(jobId);
+        } else {
+          setProgressStatus(`${data.message} (${data.progress}%)`);
         }
       } catch {
         // ignore
@@ -386,10 +454,18 @@ export const App: React.FC = () => {
       try {
         const data: SSEProgressEvent = JSON.parse(e.data);
         setProgressBarWidth(data.progress);
-        setProgressStatus(`${data.message} (${data.progress}%)`);
-        setIsGenerating(false);
-        if (data.status === 'succeeded' || data.progress === 100) {
-          setLastCompletedJobId(jobId);
+        if (data.status === 'failed') {
+          setProgressStatus(`${data.message || 'Failed'} (${data.progress}%)`);
+          if (data.failure_reason) {
+            setGlobalError(data.failure_reason);
+          }
+          setIsGenerating(false);
+        } else {
+          setProgressStatus(`${data.message} (${data.progress}%)`);
+          setIsGenerating(false);
+          if (data.status === 'succeeded' || data.progress === 100) {
+            setLastCompletedJobId(jobId);
+          }
         }
       } catch {
         // ignore
@@ -425,15 +501,22 @@ export const App: React.FC = () => {
       return;
     }
 
+    // Validate that at least scenario or photos are present
+    if (!scenario.trim() && photos.length === 0) {
+      setGlobalError('Please provide a scenario or at least one photo.');
+      return;
+    }
+
     const formData = new FormData();
     if (scenario.trim()) {
       formData.append('scenario', scenario);
     }
-    selectedFiles.forEach((file) => {
-      formData.append('images', file);
+    photos.forEach((item) => {
+      formData.append('images', item.file);
     });
-    if (altTexts.some((t) => t.trim().length > 0)) {
-      formData.append('image_alt_texts', JSON.stringify(altTexts));
+    const captions = photos.map((item) => item.caption);
+    if (captions.some((c) => c.trim().length > 0)) {
+      formData.append('image_alt_texts', JSON.stringify(captions));
     }
     formData.append('width', String(width));
     formData.append('height', String(height));
@@ -443,20 +526,38 @@ export const App: React.FC = () => {
     formData.append('chain_frames', 'true');
     formData.append('external_consent', externalConsent ? 'true' : 'false');
     formData.append('include_all_photos', includeAllPhotos ? 'true' : 'false');
+    if (videoFilename.trim()) {
+      formData.append('video_filename', videoFilename.trim());
+    }
     formData.append('transition', transition);
     if (transition !== 'none') {
       formData.append('transition_seconds', String(transitionSeconds));
     }
+    formData.append('caption_position', captionPosition);
+    if (captionPosition !== 'none') {
+      formData.append('burn_captions', 'true');
+      formData.append('captions', 'true');
+    }
 
     try {
+      setLastCompletedJobId(null);
       const created = await createJob(formData, csrfToken);
-      setScenario('');
-      setSelectedFiles([]);
-      setAltTexts([]);
+      // Keep photos and scenario intact until user clicks "완료 (Complete)"
       startSSE(created.id);
       loadJobsList();
     } catch (err: any) {
       setGlobalError(err.message || 'Job submission failed');
+    }
+  };
+
+  // Finalize video & reset form for new job
+  const handleCompleteJob = () => {
+    if (window.confirm(t.completeConfirm)) {
+      setLastCompletedJobId(null);
+      handleClearAllPhotos();
+      setScenario('');
+      setVideoFilename('');
+      setGlobalError('');
     }
   };
 
@@ -508,6 +609,15 @@ export const App: React.FC = () => {
     if (!window.confirm(t.deleteConfirm)) return;
     try {
       await removeJob(id, csrfToken);
+      if (lastCompletedJobId === id) {
+        setLastCompletedJobId(null);
+      }
+      if (activeJobId === id) {
+        setActiveJobId(null);
+        setIsGenerating(false);
+        setProgressStatus('No job running.');
+        setProgressBarWidth(0);
+      }
       loadJobsList();
     } catch (err: any) {
       setGlobalError(err.message || 'Failed to delete job');
@@ -958,62 +1068,26 @@ export const App: React.FC = () => {
                     type="file"
                     multiple
                     accept="image/jpeg,image/png,image/webp"
-                    onChange={handleFilesChange}
+                    onChange={(e) => {
+                      if (e.target.files && e.target.files.length > 0) {
+                        handleAddPhotos(Array.from(e.target.files));
+                        e.target.value = '';
+                      }
+                    }}
                   />
                 </div>
 
-                {selectedFiles.length > 0 && (
-                  <div
-                    style={{
-                      backgroundColor: '#1e293b',
-                      padding: '0.75rem 1rem',
-                      borderRadius: '6px',
-                      border: '1px solid var(--accent)',
-                      marginBottom: '1rem',
-                    }}
-                  >
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', margin: 0 }}>
-                      <input
-                        type="checkbox"
-                        checked={includeAllPhotos}
-                        onChange={(e) => setIncludeAllPhotos(e.target.checked)}
-                        style={{ width: 'auto' }}
-                      />
-                      <strong style={{ color: 'var(--text-primary)' }}>
-                        {t.includeAllPhotosLabel.replace('{count}', String(selectedFiles.length))}
-                      </strong>
-                    </label>
-                    <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', display: 'block', marginTop: '0.25rem', paddingLeft: '1.5rem' }}>
-                      {includeAllPhotos
-                        ? t.includeAllPhotosDescTrue
-                            .replace('{count}', String(selectedFiles.length))
-                            .replace('{seconds}', String(secondsPerShot))
-                            .replace('{total}', (selectedFiles.length * secondsPerShot).toFixed(1))
-                        : t.includeAllPhotosDescFalse}
-                    </span>
-                  </div>
-                )}
-
-                {selectedFiles.length > 0 && (
-                  <div id="alt-texts-container">
-                    <h4>{t.photoAltTitle}</h4>
-                    {selectedFiles.map((file, idx) => (
-                      <div key={idx} className="form-group">
-                        <label htmlFor={`alt-text-${idx}`}>
-                          {t.altTextFor.replace('{filename}', file.name)}
-                        </label>
-                        <input
-                          id={`alt-text-${idx}`}
-                          type="text"
-                          maxLength={500}
-                          value={altTexts[idx] || ''}
-                          placeholder={t.altTextPlaceholder}
-                          onChange={(e) => handleAltTextChange(idx, e.target.value)}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                )}
+                <PhotoList
+                  photos={photos}
+                  onAddPhotos={handleAddPhotos}
+                  onReplacePhoto={handleReplacePhoto}
+                  onUpdateCaption={handleUpdateCaption}
+                  onRemovePhoto={handleRemovePhoto}
+                  onMovePhoto={handleMovePhoto}
+                  onClearAll={handleClearAllPhotos}
+                  t={t}
+                  secondsPerShot={secondsPerShot}
+                />
 
                 <div className="options-grid">
                   <div className="form-group">
@@ -1065,9 +1139,29 @@ export const App: React.FC = () => {
                   t={t}
                   transition={transition}
                   transitionSeconds={transitionSeconds}
+                  captionPosition={captionPosition}
                   onTransitionChange={setTransition}
                   onTransitionSecondsChange={setTransitionSeconds}
+                  onCaptionPositionChange={setCaptionPosition}
                 />
+
+                <div className="form-group" style={{ marginTop: '0.75rem', marginBottom: '1rem' }}>
+                  <label htmlFor="video-filename" style={{ fontWeight: 600 }}>
+                    🏷️ {t.videoFilenameLabel}
+                  </label>
+                  <input
+                    id="video-filename"
+                    type="text"
+                    value={videoFilename}
+                    onChange={(e) => setVideoFilename(e.target.value)}
+                    placeholder={t.videoFilenamePlaceholder}
+                    maxLength={120}
+                    style={{ width: '100%', marginTop: '0.25rem' }}
+                  />
+                  <small style={{ color: 'var(--text-secondary)', display: 'block', marginTop: '0.25rem' }}>
+                    {t.videoFilenameHint}
+                  </small>
+                </div>
 
                 <fieldset className="form-group">
                   <legend>{t.videoEngine}</legend>
@@ -1133,7 +1227,11 @@ export const App: React.FC = () => {
                   id="create-job-btn"
                   disabled={isGenerating || (selectedProvider === 'gemini-omni-1.2-flash' && !externalConsent)}
                 >
-                  {isGenerating ? t.generatingBtn : t.generateBtn}
+                  {isGenerating
+                    ? t.generatingBtn
+                    : lastCompletedJobId
+                    ? t.recreateBtn
+                    : t.generateBtn}
                 </button>
               </form>
             </section>
@@ -1176,23 +1274,68 @@ export const App: React.FC = () => {
                     border: '1px solid var(--border)',
                   }}
                 >
-                  <h3 style={{ marginTop: 0, color: 'var(--success)' }}>{t.latestVideoPreview}</h3>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                    <h3 style={{ margin: 0, color: 'var(--success)' }}>{t.latestVideoPreview}</h3>
+                    <button
+                      type="button"
+                      id="close-preview-btn"
+                      className="btn-secondary"
+                      style={{ padding: '0.3rem 0.75rem', fontSize: '0.85rem' }}
+                      onClick={() => setLastCompletedJobId(null)}
+                      title={t.closePreviewBtn}
+                    >
+                      ✕ {t.closePreviewBtn}
+                    </button>
+                  </div>
                   <video
+                    key={lastCompletedJobId}
                     controls
                     src={`/api/jobs/${lastCompletedJobId}/video`}
                     style={{ width: '100%', maxHeight: '360px', borderRadius: '4px', backgroundColor: '#000' }}
                   >
                     {t.videoUnsupported}
                   </video>
-                  <div style={{ marginTop: '0.75rem' }}>
+                  <div style={{ marginTop: '0.75rem', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    <label htmlFor="preview-filename-input" style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
+                      💾 {t.downloadFilenameLabel}:
+                    </label>
+                    <input
+                      id="preview-filename-input"
+                      type="text"
+                      value={videoFilename}
+                      onChange={(e) => setVideoFilename(e.target.value)}
+                      placeholder={`movie_${lastCompletedJobId.slice(0, 8)}`}
+                      style={{ padding: '0.3rem 0.6rem', fontSize: '0.85rem', maxWidth: '300px', borderRadius: '4px' }}
+                    />
+                    <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>.mp4</span>
+                  </div>
+                  <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
                     <a
                       href={`/api/jobs/${lastCompletedJobId}/video`}
-                      download={`movie_${lastCompletedJobId.slice(0, 8)}.mp4`}
+                      download={getDownloadFilename(lastCompletedJobId, videoFilename)}
                       className="btn-download"
                       id="save-latest-video-btn"
                     >
                       {t.saveVideoBtn}
                     </a>
+                    <button
+                      type="button"
+                      className="btn-download"
+                      style={{ backgroundColor: '#2563eb' }}
+                      id="complete-job-btn"
+                      onClick={handleCompleteJob}
+                      title={t.completeAndNewJobBtn}
+                    >
+                      {t.completeAndNewJobBtn}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-stop"
+                      id="delete-preview-video-btn"
+                      onClick={() => handleDeleteJob(lastCompletedJobId)}
+                    >
+                      {t.deletePreviewVideoBtn}
+                    </button>
                   </div>
                 </div>
               )}
@@ -1204,7 +1347,7 @@ export const App: React.FC = () => {
               <table id="jobs-table">
                 <thead>
                   <tr>
-                    <th scope="col">{t.tableId}</th>
+                    <th scope="col">{t.tableTitleOrId || t.tableId}</th>
                     <th scope="col">{t.tableStatus}</th>
                     <th scope="col">{t.tableProgress}</th>
                     <th scope="col">{t.tableMessage}</th>
@@ -1214,7 +1357,14 @@ export const App: React.FC = () => {
                 <tbody id="jobs-table-body">
                   {jobs.map((j) => (
                     <tr key={j.id}>
-                      <td>{j.id.slice(0, 8)}...</td>
+                      <td>
+                        <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                          {(j.render_options as any)?.video_filename || (j.render_options as any)?.title || `movie_${j.id.slice(0, 8)}`}
+                        </div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                          ID: {j.id.slice(0, 8)}...
+                        </div>
+                      </td>
                       <td>{j.status}</td>
                       <td>{j.progress}%</td>
                       <td>{j.message}</td>
@@ -1230,14 +1380,28 @@ export const App: React.FC = () => {
                           </button>
                         )}
                         {j.status === 'succeeded' && (
-                          <a
-                            href={`/api/jobs/${j.id}/video`}
-                            download={`movie_${j.id.slice(0, 8)}.mp4`}
-                            className="btn-download"
-                            id={`download-btn-${j.id.slice(0, 8)}`}
-                          >
-                            {t.tableDownload}
-                          </a>
+                          <>
+                            <button
+                              type="button"
+                              className="btn-secondary"
+                              style={{ marginRight: '0.5rem' }}
+                              onClick={() => {
+                                setLastCompletedJobId(j.id);
+                                document.getElementById('completed-video-box')?.scrollIntoView({ behavior: 'smooth' });
+                              }}
+                            >
+                              {t.tablePreview}
+                            </button>
+                            <a
+                              href={`/api/jobs/${j.id}/video`}
+                              download={getDownloadFilename(j.id, (j.render_options as any)?.video_filename || (j.render_options as any)?.title)}
+                              className="btn-download"
+                              id={`download-btn-${j.id.slice(0, 8)}`}
+                              style={{ marginRight: '0.5rem' }}
+                            >
+                              {t.tableDownload}
+                            </a>
+                          </>
                         )}
                         <button type="button" onClick={() => handleDeleteJob(j.id)}>
                           {t.tableDelete}
