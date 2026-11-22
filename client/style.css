@@ -6,8 +6,8 @@
     --accent: #38bdf8;
     --accent-hover: #0284c7;
     --border: #475569;
-    --error: #f87171;
-    --success: #4ade80;
+    --error: #ef4444;
+    --success: #22c55e;
 }
 
 body {
@@ -17,8 +17,11 @@ body {
     color: var(--text-primary);
     line-height: 1.5;
     padding: 1rem;
+    min-height: 100vh;
+    box-sizing: border-box;
 }
 
+/* Header */
 header {
     display: flex;
     justify-content: space-between;
@@ -26,31 +29,232 @@ header {
     border-bottom: 2px solid var(--border);
     padding-bottom: 1rem;
     margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+    gap: 0.75rem;
 }
 
-h1, h2, h3 {
+.header-left {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+h1, h2, h3, h4 {
     color: var(--text-primary);
     margin-top: 0;
 }
 
+/* Language selector */
+.lang-selector-btn {
+    background-color: #334155;
+    color: #f8fafc;
+    border: 1px solid var(--border);
+    padding: 0.4rem 0.8rem;
+    border-radius: 4px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+}
+
+.lang-selector-btn:hover {
+    background-color: #475569;
+}
+
+/* Google-style Auth View (White background, responsive) */
+.auth-wrapper {
+    background-color: #ffffff;
+    border-radius: 12px;
+    padding: 2.5rem 1.5rem;
+    min-height: 70vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+
+.auth-card {
+    background-color: #ffffff;
+    color: #202124;
+    width: 100%;
+    max-width: 460px;
+    padding: 2rem 2.5rem;
+    border: 1px solid #dadce0;
+    border-radius: 8px;
+    box-sizing: border-box;
+}
+
+@media (max-width: 520px) {
+    .auth-card {
+        padding: 1.5rem 1.25rem;
+        border: none;
+        box-shadow: none;
+    }
+    .auth-wrapper {
+        padding: 1rem 0.5rem;
+    }
+}
+
+.auth-card h2 {
+    color: #202124;
+    font-size: 1.75rem;
+    font-weight: 500;
+    margin-bottom: 0.5rem;
+    text-align: center;
+}
+
+.auth-card .subtitle {
+    color: #5f6368;
+    font-size: 1rem;
+    text-align: center;
+    margin-bottom: 2rem;
+}
+
+.auth-card .form-group {
+    margin-bottom: 1.25rem;
+}
+
+.auth-card label {
+    color: #3c4043;
+    font-size: 0.9rem;
+    font-weight: 600;
+    display: block;
+    margin-bottom: 0.4rem;
+}
+
+.auth-card input[type="text"],
+.auth-card input[type="password"],
+.auth-card input[type="email"],
+.auth-card select {
+    width: 100%;
+    padding: 0.75rem 0.9rem;
+    border: 1px solid #747775;
+    border-radius: 4px;
+    background-color: #ffffff;
+    color: #1f2937;
+    font-size: 1rem;
+    box-sizing: border-box;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.auth-card input:focus,
+.auth-card select:focus {
+    outline: none;
+    border-color: #1a73e8;
+    box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.2);
+}
+
+.auth-card .input-with-button {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.auth-card .btn-check {
+    background-color: #f1f3f4;
+    color: #1a73e8;
+    border: 1px solid #dadce0;
+    font-weight: 600;
+    padding: 0.6rem 0.9rem;
+    border-radius: 4px;
+    white-space: nowrap;
+    cursor: pointer;
+    font-size: 0.9rem;
+}
+
+.auth-card .btn-check:hover {
+    background-color: #e8f0fe;
+}
+
+.auth-card .validation-msg {
+    font-size: 0.85rem;
+    margin-top: 0.35rem;
+    display: block;
+}
+
+.auth-card .validation-msg.available {
+    color: #137333;
+    font-weight: 500;
+}
+
+.auth-card .validation-msg.unavailable {
+    color: #d93025;
+    font-weight: 500;
+}
+
+.auth-card .auth-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 2rem;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.auth-card .btn-primary {
+    background-color: #1a73e8;
+    color: #ffffff;
+    font-weight: 600;
+    border: none;
+    padding: 0.75rem 1.5rem;
+    border-radius: 4px;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.auth-card .btn-primary:hover {
+    background-color: #1557b0;
+}
+
+.auth-card .btn-link {
+    background: none;
+    border: none;
+    color: #1a73e8;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 0.5rem 0;
+    font-size: 0.95rem;
+    text-decoration: none;
+}
+
+.auth-card .btn-link:hover {
+    text-decoration: underline;
+}
+
+.auth-card .alert-box {
+    padding: 0.75rem 1rem;
+    border-radius: 4px;
+    font-size: 0.95rem;
+    margin-bottom: 1.25rem;
+}
+
+.auth-card .alert-box.error {
+    background-color: #fce8e6;
+    color: #c5221f;
+    border: 1px solid #fad2cf;
+}
+
+.auth-card .alert-box.success {
+    background-color: #e6f4ea;
+    color: #137333;
+    border: 1px solid #ceead6;
+}
+
+/* App Main Cards */
 .card {
     background-color: var(--card-bg);
     border: 1px solid var(--border);
     border-radius: 8px;
     padding: 1.5rem;
     margin-bottom: 1.5rem;
-}
-
-.auth-forms {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 2rem;
-}
-
-@media (max-width: 640px) {
-    .auth-forms {
-        grid-template-columns: 1fr;
-    }
 }
 
 .form-group {
@@ -67,6 +271,7 @@ label {
 input[type="text"],
 input[type="password"],
 input[type="number"],
+input[type="email"],
 textarea,
 select {
     width: 100%;
@@ -115,7 +320,8 @@ button:hover {
 }
 
 .btn-download:hover {
-    background-color: #22c55e;
+    background-color: #16a34a;
+    color: #ffffff;
 }
 
 .btn-download:focus-visible {
@@ -135,7 +341,7 @@ button:hover {
 }
 
 .btn-stop:hover {
-    background-color: #ef4444;
+    background-color: #dc2626;
 }
 
 .btn-stop:focus-visible {
@@ -164,9 +370,19 @@ button:hover {
     outline-offset: 2px;
 }
 
+.btn-secondary {
+    background-color: #475569;
+    color: #ffffff;
+}
+
+.btn-secondary:hover {
+    background-color: #64748b;
+    color: #ffffff;
+}
+
 .options-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
     gap: 1rem;
 }
 
@@ -211,3 +427,118 @@ th {
     background-color: #334155;
 }
 
+@media (max-width: 640px) {
+    th, td {
+        padding: 0.5rem;
+        font-size: 0.85rem;
+    }
+}
+
+/* Feature 002: render options (scene transitions) */
+.render-options .options-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+.render-options select,
+.render-options input[type="number"] {
+  width: 100%;
+}
+.render-options .hint {
+  margin: 4px 0 0;
+  font-size: 0.85rem;
+  color: var(--text-secondary); /* #cbd5e1 on the #1e293b card: 11.0:1 */
+}
+.render-options .field-error {
+  margin: 4px 0 0;
+  font-size: 0.9rem;
+  color: #fca5a5; /* 7.6:1 on the #1e293b card; the text itself states the problem */
+  font-weight: 600;
+}
+
+/* Photo list & cards */
+.photo-list-container {
+  margin-top: 1rem;
+  padding: 1rem;
+  background-color: #1e293b;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+
+.photo-list-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.photo-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.photo-card {
+  display: flex;
+  flex-direction: column;
+  background-color: #0f172a;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.75rem;
+  gap: 0.5rem;
+}
+
+.photo-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.photo-badge {
+  background-color: var(--primary);
+  color: #ffffff;
+  padding: 0.2rem 0.6rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.photo-card-actions {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.photo-card-body {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+@media (max-width: 600px) {
+  .photo-card-body {
+    flex-direction: column;
+  }
+}
+
+.photo-thumb {
+  width: 140px;
+  height: 95px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid #334155;
+  flex-shrink: 0;
+  background-color: #000;
+}
+
+.photo-caption-box {
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  width: 100%;
+}

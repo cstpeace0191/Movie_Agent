@@ -1,3 +1,4 @@
+import mimetypes
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -8,17 +9,25 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from server.app.api.auth import router as auth_router
 from server.app.api.jobs import router as jobs_router
+from server.app.api.mail import router as mail_router
 from server.app.config import settings
-from server.app.db import Base, engine
+from server.app.db import Base, engine, ensure_schema_compatibility
+from server.app.mail_server import start_mail_server, stop_mail_server
 
-# Ensure tables are created immediately
+# Ensure tables are created immediately and schema is compatible
 Base.metadata.create_all(bind=engine)
+ensure_schema_compatibility(engine)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
-    yield
+    ensure_schema_compatibility(engine)
+    start_mail_server()
+    try:
+        yield
+    finally:
+        stop_mail_server()
 
 
 app = FastAPI(
@@ -68,6 +77,7 @@ async def generic_exception_handler(request: Request, exc: Exception):
 # Routes
 app.include_router(auth_router)
 app.include_router(jobs_router)
+app.include_router(mail_router)
 
 
 @app.get("/api/health")
@@ -78,6 +88,10 @@ def health():
         "queue": "idle",
     }
 
+
+# Windows can register .js as text/plain; browsers then refuse to run the module bundle.
+mimetypes.add_type("text/javascript", ".js")
+mimetypes.add_type("text/css", ".css")
 
 # Server static files (serves built React bundle copied to server/app/static)
 server_static_dir = Path(__file__).resolve().parent / "static"

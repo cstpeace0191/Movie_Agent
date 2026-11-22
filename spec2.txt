@@ -1,0 +1,319 @@
+================================================================================
+ Movie Maker - 텍스트 시나리오 / 정지 이미지 기반 동영상 생성 시스템
+ Specification v0.2   (작성일: 2026-11-20, 개정: 2026-11-21)
+================================================================================
+
+0. 변경 이력
+--------------------------------------------------------------------------------
+  v0.1 (2026-11-20) 최초 작성. 입력 3모드, VideoProvider, 샷 단위 생성/연결.
+  v0.2 (2026-11-21) 편집/표현 기능 추가.
+       - 타임라인 합성기(Timeline) 도입: 전환/자막/오디오 시간 계산 일원화
+       - 장면 전환 효과, 사진별 안내 프롬프트 -> 캡션, 자막(SRT/번인)
+       - slideshow provider (Ken Burns / 패닝, GPU 불필요)
+       - 배경음악, TTS 내레이션, 덕킹, 단어 하이라이트 자막
+       - 화면 비율 프리셋 / 스마트 크롭
+       - 스토리보드 검토-수정-렌더 2단계 흐름, 샷 단위 재생성, 템플릿
+       - 데이터 모델(7장) 및 API(6장) 확장, 로드맵(11장) 재구성
+
+1. 개요
+--------------------------------------------------------------------------------
+1.1 목적
+  사용자가 입력한 (a) 텍스트 시나리오(프롬프트), (b) 정지 이미지(사진), 또는
+  (a)+(b)를 이용하여 캡션과 오디오가 포함된 동영상(MP4)을 생성하는
+  클라이언트-서버 구조의 프로그램을 개발한다.
+
+1.2 입력 모드
+  - TEXT_ONLY   : 시나리오만 입력  -> (키프레임 이미지 생성) -> T2V 또는 I2V
+  - IMAGE_ONLY  : 사진만 입력      -> I2V 또는 slideshow
+                  (사진별 안내 프롬프트가 있으면 그것으로 모션/캡션 생성,
+                   없으면 기본 모션 프롬프트 + 이미지 분석 캡션)
+  - TEXT_IMAGE  : 시나리오 + 사진  -> 프롬프트가 붙은 I2V
+
+1.3 생성 엔진 정책
+  - 서버는 자체 동영상 생성 솔루션(로컬 오픈 웨이트 모델)을 기본으로 한다.
+  - 외부 AI 동영상 API(Veo, Kling, Runway, Luma 등)도 동일 인터페이스로 사용 가능.
+  - 엔진 교체는 설정(환경 변수)만으로 가능해야 한다 (VideoProvider 추상화).
+  - GPU 가 없는 환경에서도 실사용 가능한 slideshow 엔진을 제공한다.
+
+2. 추천 오픈소스 (2026년 중반 기준, 도입 전 최신 버전/라이선스 재확인 필요)
+--------------------------------------------------------------------------------
+2.1 동영상 생성 모델
+  | 모델              | 모드                | 라이선스          | 비고
+  |-------------------|---------------------|-------------------|------------------------------
+  | Wan 2.1 / 2.2     | T2V, I2V, FLF2V     | Apache 2.0        | 1순위. 1.3B=VRAM 8GB, 14B=24~80GB
+  | LTX-Video         | T2V, I2V, 확장      | LTXV Open License | 초고속, 미리보기/초안용
+  | CogVideoX         | T2V, I2V            | 2B Apache / 5B 자체| Diffusers 지원 안정
+  | Mochi 1           | T2V                 | Apache 2.0        | 모션 품질 우수, I2V 약함
+  | FramePack         | I2V (장편)          | Apache 2.0        | VRAM 6GB로 장시간 I2V
+  | SkyReels V2       | T2V, I2V, 무한 길이 | 자체 라이선스     | 장편 생성
+  | HunyuanVideo      | T2V, I2V            | Tencent 라이선스  | ※ 한국/EU/영국 제외 조항 -> 국내 서비스 사용 지양
+
+  => 기본 엔진: Wan 2.1 (ComfyUI 경유). 세 입력 모드를 단일 모델 계열로 처리 가능.
+
+2.2 파이프라인 구성 요소
+  | 역할                      | 오픈소스
+  |---------------------------|--------------------------------------------------
+  | 추론 실행 / 워크플로      | ComfyUI (API 모드), 🤗 Diffusers
+  | 시나리오 -> 샷 분해 (LLM) | Claude API, 또는 로컬 Qwen (vLLM / Ollama)
+  | 캡션 작성 / 이미지 분석   | Claude API (vision), 로컬 Qwen2.5-VL
+  | 키프레임 이미지 생성      | FLUX.1 [schnell] (Apache 2.0), SDXL
+  | 인물 일관성               | IP-Adapter, PuLID, Wan LoRA
+  | 깊이 추정 (2.5D 패럴랙스) | Depth Anything V2 (Small=Apache 2.0)
+  | 피사체/얼굴 검출 (크롭)   | MediaPipe (Apache 2.0), OpenCV
+  | TTS (한국어)              | MeloTTS (MIT), CosyVoice 2 (Apache)
+  | 립싱크 / 토킹헤드         | LivePortrait, MuseTalk
+  | 자막 정렬 (단어 타이밍)   | faster-whisper
+  | 프레임 보간 / 업스케일    | RIFE, Real-ESRGAN
+  | 편집 / 합성               | FFmpeg (필수: xfade, acrossfade, subtitles/libass,
+  |                           |  sidechaincompress, loudnorm), MoviePy, MLT
+  | 배경음악                  | 저작권 무료 음원 라이브러리(라이선스 표기 관리),
+  |                           | MusicGen (가중치 CC-BY-NC -> 상업 사용 주의)
+  | 한글 자막 폰트            | Noto Sans KR / Pretendard (OFL)
+
+3. 시스템 아키텍처
+--------------------------------------------------------------------------------
+  [Client: Web (HTML/JS, 추후 React/Next.js 또는 Flutter)]
+     │  REST (작업 생성/조회/수정) + SSE (진행률 스트림)
+     ▼
+  [API Server: FastAPI]  ── DB(SQLite→PostgreSQL), Storage(Local→MinIO/S3)
+     │  작업 큐잉
+     ▼
+  [Broker: Redis]  ←→  [Celery Worker (GPU 노드)]
+                          ├─ 1. 계획(plan)
+                          │     ├─ 시나리오 분석 (LLM) → shot list JSON
+                          │     └─ 사진별 안내 프롬프트/이미지 분석 → 캡션·내레이션·모션
+                          │   ※ review 모드면 여기서 status=planned 로 멈추고 사용자 수정 대기
+                          ├─ 2. 키프레임 생성 (FLUX)        ※ 이미지 없을 때 (선택)
+                          ├─ 3. 샷별 영상 생성  ← VideoProvider  (샷 단위 캐시)
+                          │       ├─ comfyui   : 로컬 Wan/LTX (ComfyUI API)
+                          │       ├─ slideshow : Ken Burns / 패닝 / 2.5D (FFmpeg, GPU 불필요)
+                          │       ├─ mock      : FFmpeg 테스트 영상 (개발용)
+                          │       └─ external  : 외부 AI API (어댑터)
+                          ├─ 4. 오디오: TTS 내레이션 → 샷 길이 보정, 배경음악 준비
+                          ├─ 5. Timeline 구성: 장면 시작/길이/전환/자막 큐/오디오 배치
+                          └─ 6. FFmpeg 합성(Timeline → filter graph) → final.mp4 (+ .srt)
+
+  설계 원칙
+  - VideoProvider 추상화: generate(shot, image_path) -> 영상 파일 경로
+  - 샷 단위 생성 후 연결: 모델 1회 생성 길이(5~10초) 한계 극복.
+    이전 샷의 마지막 프레임을 다음 샷의 I2V 입력으로 사용(chain_frames 옵션).
+  - 모든 생성 작업은 비동기(큐) 처리, 진행률은 DB에 기록 후 SSE로 푸시.
+  - 시간 계산은 Timeline 한 곳에서만 한다 (4.1 참조). 합성기·자막·오디오는
+    Timeline 이 계산한 값만 사용하고 각자 시간을 다시 계산하지 않는다.
+  - 생성(비싼 단계)과 합성(싼 단계)을 분리한다. 캡션·전환·음악만 바뀌면
+    샷 영상을 재생성하지 않고 재합성만 한다.
+
+4. 타임라인 모델
+--------------------------------------------------------------------------------
+4.1 계산 규칙
+  - 장면 i 의 길이 d_i 는 실제 생성된 클립 길이(probe)와 요청 길이 중 작은 값.
+    (TTS 내레이션이 있으면 F-21 에 따라 요청 길이가 먼저 늘어난다.)
+  - 장면 i 로 들어오는 전환 길이 t_i (장면 0 은 0, transition=none 이면 0).
+    t_i 는 min(transition_duration, d_{i-1}/2, d_i/2) 로 제한한다.
+  - 시작 시각: s_0 = 0,  s_i = s_{i-1} + d_{i-1} - t_i
+  - 전체 길이: T = s_last + d_last  (전환이 있으면 Σd_i 보다 Σt_i 만큼 짧다)
+  - 자막 큐 i: [s_i + t_i/2,  s_{i+1} + t_{i+1}/2) , 마지막은 T 까지.
+  - 오디오 배치: 내레이션 i 는 s_i + t_i 에서 시작. 배경음악은 0~T 전체.
+4.2 합성 그래프 (FFmpeg)
+  - 입력 정규화: scale/pad(또는 smart crop) → setsar=1 → fps → format=yuv420p
+    → trim=duration=d_i → settb=AVTB
+  - 연결: t_i>0 이면 xfade(transition, duration=t_i, offset=s_i),
+          t_i=0 이면 concat(n=2). 두 방식을 장면마다 섞어 쓸 수 있다.
+  - 자막: SRT/ASS 생성 후 subtitles 필터로 번인(옵션). 한글 폰트 경로 지정.
+  - 오디오: 내레이션 adelay 배치 → 배경음악 aloop/atrim/afade
+    → sidechaincompress(덕킹) → amix → loudnorm(-14 LUFS, 플랫폼 기준).
+
+5. 기능 요구사항
+--------------------------------------------------------------------------------
+5.1 기본 (v0.1)
+  F-01 작업 생성: 시나리오 텍스트(선택), 이미지 파일 1~N장(선택), 옵션 제출.
+       둘 다 없으면 400 오류.
+  F-02 옵션: 해상도(width/height), 샷당 길이(초), fps, provider, chain_frames.
+  F-03 시나리오 분해: LLM이 장면별 {prompt, duration, narration} 목록을 생성.
+       LLM 미설정/실패 시 문단 단위 규칙 기반 분해로 대체.
+  F-04 이미지 매핑: 업로드 이미지 i 를 샷 i 에 대응. 이미지가 샷보다 적으면
+       마지막 이미지 또는 이전 샷 마지막 프레임을 사용.
+       IMAGE_ONLY 모드는 이미지 1장당 1샷.
+  F-05 영상 생성: provider 별 샷 영상 생성.
+  F-06 합성: 샷 영상들을 Timeline(4장)에 따라 정규화·연결 → final.mp4.
+  F-07 진행률: status(queued/running/planned/succeeded/failed), progress(0~100), message.
+  F-08 결과 조회/다운로드: 최종 MP4 및 샷 목록 제공.
+  F-09 작업 목록 조회.
+
+5.2 장면 구성 / 전환 (v0.2, Phase 2)
+  F-10 Timeline: 4.1 규칙으로 장면 시작/길이/전환/자막 큐를 계산하고
+       각 샷에 start/end 를 기록한다.
+  F-11 장면 전환: transition 옵션(none, fade, fadeblack, fadewhite, dissolve,
+       slideleft, slideright, slideup, slidedown, wipeleft, circleopen, zoomin,
+       auto). 작업 기본값 + 샷별 override. auto 는 목록에서 순환 선택.
+       transition_duration 기본 0.5초 (0.1~2.0).
+  F-12 slideshow provider: 정지 이미지에 motion 적용
+       (zoom_in, zoom_out, pan_left, pan_right, pan_up, pan_down, auto).
+       피사체 검출이 가능하면 피사체 쪽으로 줌/패닝. 2.5D 패럴랙스는 Phase 3.
+  F-13 화면 비율 프리셋: aspect = 16:9 | 9:16 | 1:1 | 4:5 | custom.
+       프리셋 선택 시 width/height 자동 결정. 비율이 다른 이미지는
+       fit(레터박스/블러 배경) 또는 fill(스마트 크롭) 중 선택.
+
+5.3 캡션 / 자막 (v0.2, Phase 2)
+  F-14 사진 목록, 사진별 캡션 및 프리뷰 기반 반복 수정: 다중 사진 선택 시 누적 등록되며, 등록된
+       사진 리스트를 썸네일·순서·파일명과 함께 시각적으로 제공한다. 각 사진마다 캡션(caption) 텍스트를 입력할 수 있으며,
+       개별 사진 교체(Replace Photo), 순서 변경(위/아래) 및 개별/전체 삭제를 지원한다.
+       동영상 생성 중 및 프리뷰 상태에서도 사진 목록과 캡션이 유지되어, 프리뷰 확인 후 사진이나 캡션을 교체하여
+       수정된 내용으로 동영상을 즉시 다시 제작할 수 있으며, 프리뷰의 [완료] 시점에 폼이 초기화된다.
+  F-15 캡션 생성: LLM 이 안내 프롬프트(+이미지)를 바탕으로 샷별
+       {caption(화면 자막, 1~2줄), narration(읽을 문장), prompt(모션/영상 프롬프트)}
+       를 생성. caption_tone 옵션(info, emotional, humor, vlog, ad).
+       사용자가 입력한 사실을 벗어난 내용은 만들지 않는다.
+  F-16 자막 출력: SRT(필수) / ASS(스타일 포함) 파일 생성,
+       burn_captions=true 이면 영상에 번인. 각 사진 설명글(alt text / 안내 메모)을 자막(caption)으로 사용.
+  F-17 자막 스타일 및 9개 위치: caption_style = {font, size, color, outline, box, position}.
+       position 은 9개 지정 위치(상단 좌측 top_left, 상단 중앙 top_center, 상단 우측 top_right,
+       중단 좌측 middle_left, 중단 중앙 middle_center, 중단 우측 middle_right,
+       하단 좌측 bottom_left, 하단 중앙 bottom_center, 하단 우측 bottom_right, 없음 none)를 지원.
+       (하위 호환: top=top_center, bottom=bottom_center, auto=bottom_center).
+       나눔고딕(NanumGothic) 폰트와 반투명 박스(BorderStyle=3)를 기본 적용하여 가독성 4.5:1 확보.
+  F-18 타이틀/엔딩 카드 및 파일명: title, ending_text(선택) 를 첫/끝 장면으로 추가.
+       video_filename 옵션을 통해 제작된 동영상의 다운로드 파일명을 직접 지정 가능.
+
+5.4 오디오 (v0.2, Phase 2~3)
+  F-19 배경음악: bgm = 업로드 파일 | 내장 라이브러리 id | none.
+       영상 길이에 맞춰 반복/자르기, 시작/끝 페이드, 볼륨(bgm_volume).
+  F-20 TTS 내레이션: tts_voice(none 이면 비활성), 언어, 속도.
+       샷별 narration 을 음성 파일로 생성.
+  F-21 길이 자동 보정: 내레이션이 있는 샷은 duration = max(요청 길이, 음성 길이 + 0.5초).
+       보정은 영상 생성 전에 수행한다(I2V 프레임 수 결정).
+  F-22 덕킹: 내레이션 구간에서 배경음악을 자동으로 낮춘다(ducking=true).
+  F-23 음량 정규화: 최종 오디오 loudnorm. 오디오가 하나도 없으면 무음 트랙을 넣지 않는다.
+  F-24 단어 하이라이트 자막: faster-whisper 단어 타이밍 → ASS 카라오케 자막(옵션).
+  F-25 비트 싱크: 배경음악 비트에 맞춰 전환 시점 조정(옵션, Phase 3).
+
+5.5 편집 흐름 (v0.2, Phase 3)
+  F-26 2단계 실행: review=true 이면 계획 단계 후 status=planned 로 멈춘다.
+       사용자가 샷을 수정한 뒤 render 요청 시 생성/합성 진행.
+  F-27 샷 수정: 순서 변경, 삭제, prompt/caption/narration/duration/transition/motion 수정.
+  F-28 샷 재생성: 지정 샷만 다시 생성(seed 변경 가능). 나머지 샷은 캐시 사용.
+  F-29 재합성: 영상 생성 파라미터(prompt, image, duration, motion, seed)가 바뀌지 않은 샷은
+       재생성하지 않고 캐시 클립을 사용한다(캐시 키 = 위 파라미터 해시).
+  F-30 템플릿/프리셋: preset 하나로 transition, caption_style, bgm, caption_tone,
+       aspect 를 일괄 적용(여행, 생일, 추모, 제품 소개, 교육 등). 개별 옵션이 우선.
+  F-31 사진 순서 추천: EXIF 촬영 시각/파일명 기준 자동 정렬(옵션).
+
+6. API 명세 (v1, v0.2 확장 포함)
+--------------------------------------------------------------------------------
+  POST /api/jobs                 multipart/form-data
+       scenario: str (opt), images: file[] (opt), captions: str[] (opt, images 와 같은 순서),
+       width:int=832, height:int=480, aspect:str (opt),
+       seconds_per_shot:float=5, fps:int=16,
+       provider:str (opt, 기본=서버 설정), chain_frames:bool=true,
+       transition:str="none", transition_duration:float=0.5, motion:str="auto",
+       caption_tone:str (opt), burn_captions:bool=false, caption_style:json (opt),
+       title:str (opt), ending_text:str (opt),
+       bgm:file|str (opt), bgm_volume:float=0.3, tts_voice:str (opt), ducking:bool=true,
+       preset:str (opt), review:bool=false
+       -> 201 {id, status, mode, ...}
+  GET  /api/jobs                       -> [Job...]
+  GET  /api/jobs/{id}                  -> Job (shots 포함)
+  GET  /api/jobs/{id}/events           -> text/event-stream (진행률 SSE)
+  GET  /api/jobs/{id}/video            -> video/mp4
+  GET  /api/jobs/{id}/subtitles?format=srt|ass   -> text/plain       (F-16)
+  PATCH /api/jobs/{id}                 -> 옵션 수정 (transition, caption_style, bgm 등)
+  PATCH /api/jobs/{id}/shots           -> 샷 목록 교체(순서/삭제/수정)   (F-27)
+  POST /api/jobs/{id}/render           -> planned 상태에서 생성·합성 시작 (F-26, F-29)
+  POST /api/jobs/{id}/shots/{i}/regenerate  {seed?} -> 해당 샷 재생성  (F-28)
+  GET  /api/presets                    -> [Preset...]                    (F-30)
+  GET  /api/music                      -> [내장 배경음악 {id, title, mood, license}]
+  GET  /api/health                     -> {status, provider}
+
+  상태 전이: queued → running → (planned → running) → succeeded | failed
+  running 중 수정/재생성 요청은 409.
+
+7. 데이터 모델
+--------------------------------------------------------------------------------
+  Job = {id, mode, status, progress, message, scenario, options, shots[],
+         video_url, subtitles_url, duration, created_at, updated_at}
+
+  Shot = {
+    index, prompt, duration,
+    narration,                 # 읽을 문장 (TTS)
+    caption,                   # 화면 자막
+    user_note,                 # 사용자 안내 프롬프트 (F-14)
+    image, video,              # storage 상대 경로
+    transition, motion, seed,  # null 이면 작업 기본값
+    narration_audio,           # TTS 결과 경로
+    start, end,                # Timeline 계산 결과 (초)
+    cache_key                  # F-29
+  }
+
+  JobOptions (v0.1 + 추가) = {
+    width, height, seconds_per_shot, fps, provider, chain_frames,
+    aspect, fit_mode(fit|fill), transition, transition_duration, motion,
+    caption_tone, burn_captions, caption_style, title, ending_text,
+    bgm, bgm_volume, tts_voice, ducking, preset, review
+  }
+
+8. 비기능 요구사항
+--------------------------------------------------------------------------------
+  - 장시간 작업(수 분~수십 분) 대응: 비동기 큐, 작업 타임아웃 설정.
+  - GPU 1장 기준 worker concurrency = 1.
+  - 업로드 제한: 이미지 jpg/png/webp 장당 20MB, 배경음악 mp3/wav/m4a 30MB.
+  - 개발 환경에서는 mock / slideshow provider 로 GPU/ComfyUI 없이 전체 흐름 검증 가능.
+  - 비밀값(API 키)은 .env 로 관리, 저장소에 커밋 금지.
+  - 재합성(캡션·전환·음악 변경)은 샷 재생성 없이 1분 이내(1080p, 1분 영상 기준 목표).
+  - 개인정보: 업로드 이미지의 EXIF GPS 는 저장 시 제거(옵션으로 보존).
+  - 저작권: 내장 배경음악은 라이선스 정보를 함께 저장하고 결과 화면에 표기.
+  - 접근성: 자막 파일은 번인 여부와 관계없이 항상 제공.
+
+9. 기술 스택
+--------------------------------------------------------------------------------
+  Server : Python 3.11, FastAPI, SQLAlchemy, Pydantic Settings
+  Queue  : Celery 5 + Redis  (Windows 에서는 --pool=solo)
+  Engine : ComfyUI + Wan 2.1, FFmpeg (libass 포함 빌드)
+  LLM    : Anthropic Python SDK (claude-opus-5-5, vision 포함), 미설정 시 규칙 기반
+  TTS    : MeloTTS 또는 CosyVoice 2 (TtsProvider 추상화, provider 와 동일 방식)
+  Client : 정적 HTML/CSS/JS (FastAPI 가 /static 으로 서빙)
+
+10. 디렉터리 구조
+--------------------------------------------------------------------------------
+  Movie_Maker/
+    spec.txt, README.md, docker-compose.yml
+    server/
+      requirements.txt, .env.example
+      app/        FastAPI (config, db, models, schemas, storage, api/jobs.py, main.py)
+      worker/     Celery (celery_app, tasks)
+        pipeline/   scenario.py   샷 분해 / 캡션 생성
+                    timeline.py   Timeline 계산 (4.1)              [v0.2]
+                    compose.py    Timeline → FFmpeg filter graph (4.2)
+                    subtitles.py  SRT/ASS 생성                     [v0.2]
+                    audio.py      배경음악/내레이션 믹싱, 덕킹      [v0.2]
+                    ffmpeg.py     실행, probe_duration, 프레임 추출
+        providers/  base, mock, slideshow[v0.2], comfyui, external
+        tts/        base, melotts / cosyvoice                      [v0.2]
+      assets/     fonts/ (한글 폰트), music/ (내장 배경음악 + license.json),
+                  presets/ (템플릿 JSON)                           [v0.2]
+      workflows/  ComfyUI API-format 워크플로 템플릿 (wan_t2v.json, wan_i2v.json)
+    client/       index.html, app.js, style.css
+
+11. 단계별 로드맵
+--------------------------------------------------------------------------------
+  Phase 1 (MVP, 완료)
+    FastAPI + Celery + ComfyUI(Wan 2.1 1.3B) + FFmpeg, T2V/I2V, mock provider.
+
+  Phase 2 (편집/표현 기본)  ※ 모두 mock/slideshow 로 GPU 없이 검증 가능
+    2-1 Timeline 합성기 리팩터링 (F-10, 4장)          ← 진행 중
+    2-2 사진별 안내 프롬프트 + 캡션 생성 (F-14, F-15)
+    2-3 장면 전환 (F-11)
+    2-4 자막 SRT/번인 (F-16, F-17, F-18)
+    2-5 slideshow provider (F-12)
+    2-6 배경음악 (F-19, F-23)
+
+  Phase 3 (오디오 고도화 / 편집 흐름)
+    3-1 TTS 내레이션 + 길이 보정 + 덕킹 (F-20~F-22)
+    3-2 단어 하이라이트 자막 (F-24), 비율 프리셋/스마트 크롭 (F-13)
+    3-3 2단계 실행, 샷 수정/재생성, 캐시 재합성 (F-26~F-29) + 스토리보드 편집 UI
+    3-4 템플릿/프리셋, 사진 순서 추천 (F-30, F-31)
+
+  Phase 4 (품질/운영)
+    LLM 샷 분해 고도화, FLUX 키프레임, RIFE 보간, 2.5D 패럴랙스, 비트 싱크(F-25),
+    Wan 14B / 외부 API, 캐릭터 일관성(LoRA/IP-Adapter),
+    사용자 인증, PostgreSQL/MinIO 전환, 다국어 자막 번역.
+================================================================================

@@ -3,6 +3,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     Column,
     DateTime,
@@ -28,12 +29,19 @@ def gen_uuid() -> str:
 
 # Validation helpers
 USERNAME_REGEX = re.compile(r"^[a-zA-Z0-9_]{3,32}$")
+EMAIL_REGEX = re.compile(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$")
 
 
 def validate_username(username: str) -> bool:
     if not isinstance(username, str):
         return False
     return bool(USERNAME_REGEX.match(username))
+
+
+def validate_email(email: str | None) -> bool:
+    if not email or not isinstance(email, str):
+        return False
+    return bool(EMAIL_REGEX.match(email.strip()))
 
 
 def validate_password(password: str) -> bool:
@@ -65,6 +73,12 @@ class User(Base):
     username = Column(String(32), unique=True, index=True, nullable=False)
     username_lower = Column(String(32), unique=True, index=True, nullable=False)
     password_hash = Column(String(255), nullable=False)
+    country = Column(String(64), nullable=True)
+    phone = Column(String(32), nullable=True)
+    email = Column(String(255), nullable=True, index=True)
+    email_verified = Column(Boolean, default=False, nullable=False)
+    verification_code = Column(String(64), nullable=True)
+    verification_expires_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=utcnow, nullable=False)
 
     sessions = relationship("Session", back_populates="user", cascade="all, delete-orphan")
@@ -96,7 +110,7 @@ class Job(Base):
     scenario = Column(Text, nullable=True)
     status = Column(
         String(32), default="queued", nullable=False, index=True
-    )  # queued, running, succeeded, failed, expired
+    )  # drafting, awaiting_review, queued, running, succeeded, failed, expired
     progress = Column(Integer, default=0, nullable=False)
     message = Column(String(200), default="Queued", nullable=False)
     failure_reason = Column(String(500), nullable=True)
@@ -112,6 +126,15 @@ class Job(Base):
     planned_seconds = Column(Float, default=0.0, nullable=False)
     unused_image_count = Column(Integer, default=0, nullable=False)
     final_video_path = Column(String(500), nullable=True)
+
+    # Feature 002 (data-model.md). Render options default to {} = feature 001 behaviour.
+    render_options = Column(JSON, default=dict, nullable=True)
+    text_assist_consent_at = Column(DateTime, nullable=True)
+    review_confirmed_at = Column(DateTime, nullable=True)
+    bgm_path = Column(String(500), nullable=True)
+    subtitles_srt_path = Column(String(500), nullable=True)
+    subtitles_ass_path = Column(String(500), nullable=True)
+    final_duration_seconds = Column(Float, nullable=True)
 
     created_at = Column(DateTime, default=utcnow, nullable=False)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
@@ -146,6 +169,16 @@ class Scene(Base):
         String(36), ForeignKey("source_images.id", ondelete="SET NULL"), nullable=True
     )
     split_method = Column(String(32), default="paragraph", nullable=False)
+
+    # Feature 002 (data-model.md). Card scenes (kind title/ending) may have empty description.
+    kind = Column(String(16), default="scene", nullable=False)  # scene, title, ending
+    caption = Column(Text, nullable=True)
+    caption_source = Column(String(16), nullable=True)  # assisted, verbatim, user
+    narration = Column(Text, nullable=True)
+    transition = Column(String(32), nullable=True)  # null = job default; transition INTO scene
+    motion = Column(String(16), nullable=True)
+    start_seconds = Column(Float, nullable=True)  # timeline result
+    length_seconds = Column(Float, nullable=True)  # measured clip length on the timeline
 
     job = relationship("Job", back_populates="scenes")
     source_image = relationship("SourceImage")
@@ -188,7 +221,21 @@ class SourceImage(Base):
     alt_text = Column(String(500), nullable=True)
     storage_path = Column(String(500), nullable=False)
     used = Column(Boolean, default=True, nullable=False)
+    note = Column(String(500), nullable=True)  # feature 002: note for caption, <= 500 chars
 
     job = relationship("Job", back_populates="source_images")
 
     __table_args__ = (UniqueConstraint("job_id", "position", name="uq_image_job_position"),)
+
+
+class SentEmail(Base):
+    __tablename__ = "sent_emails"
+
+    id = Column(String(36), primary_key=True, default=gen_uuid)
+    recipient = Column(String(255), index=True, nullable=False)
+    sender = Column(String(255), nullable=False)
+    subject = Column(String(255), nullable=False)
+    body_text = Column(Text, nullable=False)
+    verification_code = Column(String(16), nullable=True)
+    status = Column(String(32), default="delivered", nullable=False)
+    created_at = Column(DateTime, default=utcnow, index=True, nullable=False)

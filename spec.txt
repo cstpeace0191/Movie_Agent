@@ -100,12 +100,23 @@
   GET  /api/jobs/{id}/events     -> text/event-stream (진행률 SSE)
   GET  /api/jobs/{id}/video      -> video/mp4
   GET  /api/health               -> {status, provider}
+  GET  /api/auth/check-username  -> {available, message} (계정 중복 검사)
+  POST /api/auth/register        -> {id, username, verification_required, ...} (가입 & 인증 메일)
+  POST /api/auth/verify-email    -> {success, message_ko, message_en} (이메일 6자리 코드 인증)
+  POST /api/auth/login           -> {id, username, csrf_token}
+  POST /api/auth/logout          -> 204
+  POST /api/jobs/{id}/cancel     -> 작업 중지
+  POST /api/system/shutdown      -> 프로그램 종료
 
   Job = {id, mode, status, progress, message, scenario, options, shots[],
          video_url, created_at, updated_at}
 
-6. 비기능 요구사항
+6. 비기능 및 UI 요구사항
 --------------------------------------------------------------------------------
+  - 다국어 인터페이스(i18n): 한국어 및 영어 실시간 전환 토글 지원.
+  - 인증 화면 디자인: Google 로그인 스타일의 흰색 바탕 반응형 카드 폼.
+    가입 시 계정 중복 검사, 국가/전화번호/이메일 입력. Python 애플리케이션·워커 메일 시스템(FastAPI / Celery / aiosmtpd 내장 포트 1025)을 통해 6자리 인증 코드 발송 및 실시간 인앱 메일 수신함 제공.
+    코드 확인 성공 시 "인증되었습니다" (영문: "You are Verified") 메시지 표출 후 2초 뒤 로그인 화면 자동 전환.
   - 장시간 작업(수 분~수십 분) 대응: 비동기 큐, 작업 타임아웃 설정.
   - GPU 1장 기준 worker concurrency = 1.
   - 업로드 제한: 이미지 jpg/png/webp, 장당 20MB.

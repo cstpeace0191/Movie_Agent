@@ -4,8 +4,8 @@ Movie Maker is an AI-powered movie and video generation web service that turns s
 
 ## Architecture
 
-- **Backend**: Python 3.11, FastAPI, SQLAlchemy 2.0 (MySQL 9.3 / SQLite), Celery 5 (Redis broker), Argon2id session authentication + CSRF protection, FFmpeg video processing pipeline.
-- **Frontend / Client**: React 18 + TypeScript SPA bundled with Vite, conforming to WCAG 2.2 AA accessibility standards.
+- **Backend**: Python 3.11, FastAPI, SQLAlchemy 2.0 (MySQL 9.3 / SQLite), Celery 5 (Redis broker), Argon2id session authentication + CSRF protection, built-in Python `aiosmtpd` SMTP mail server system (port 1025) with Celery async email worker, In-App Mailbox API, FFmpeg video processing pipeline with ASS/SRT subtitle generation & burn-in (9 screen positions, bundled NanumGothic font).
+- **Frontend / Client**: React 18 + TypeScript SPA bundled with Vite, conforming to WCAG 2.2 AA accessibility standards. Features Korean/English bilingual interface, Google-style white responsive authentication UI with real-time uniqueness validation for username, email, and phone number, 6-digit email verification with live In-App Mailbox & SMTP delivery, success notification ("인증되었습니다 / You are Verified"), automatic 2-second redirect to login, and video render options (13 transitions, 9 caption positions from photo descriptions).
 - **Video Engines**:
   - `ltx-2.3`: Local ComfyUI GPU provider (default).
   - `gemini-omni-1.2-flash`: Google Gemini cloud provider with explicit data disclosure & consent gating.
@@ -41,7 +41,12 @@ cd ..
 fastapi dev --port 8000
 
 # 2. Celery Worker (in a separate terminal)
-celery -A server.worker.celery_app worker --pool=solo --concurrency=1 -l info
+# GPU generation queue (one job at a time)
+celery -A server.worker.celery_app worker -Q generation --pool=solo --concurrency=1 -l info
+
+# 2b. Planning queue (caption drafts, verification e-mail, retention sweep) in another terminal.
+#     On a single dev machine you can instead run one worker for both: -Q generation,planning
+celery -A server.worker.celery_app worker -Q planning --pool=solo --concurrency=1 -l info
 
 # 3. Celery Beat Scheduler (retention cleanup)
 celery -A server.worker.celery_app beat -l info

@@ -47,6 +47,27 @@ def get_final_video_path(job_id: str) -> Path:
     return get_job_dir(job_id) / "final.mp4"
 
 
+def get_subtitles_path(job_id: str, fmt: str) -> Path:
+    """Return the subtitle file path for a job (``fmt`` is ``srt`` or ``ass``)."""
+    if fmt not in ("srt", "ass"):
+        raise ValueError(f"Unsupported subtitle format: {fmt}")
+    return get_job_dir(job_id) / f"subtitles.{fmt}"
+
+
+def get_bgm_path(job_id: str, extension: str) -> Path:
+    """Return the path for a job's uploaded background music."""
+    audio_dir = get_job_dir(job_id) / "audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    return audio_dir / f"bgm.{extension.lstrip('.')}"
+
+
+def get_card_path(job_id: str, kind: str) -> Path:
+    """Return the clip path for a title or ending card."""
+    cards_dir = get_job_dir(job_id) / "cards"
+    cards_dir.mkdir(parents=True, exist_ok=True)
+    return cards_dir / f"{kind}.mp4"
+
+
 def delete_job_media(job_id: str) -> bool:
     """Remove all stored media files and directories associated with a job."""
     job_dir = get_storage_dir() / "jobs" / job_id

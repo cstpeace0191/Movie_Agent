@@ -21,6 +21,19 @@ class Settings(BaseSettings):
     STORAGE_DIR: str = "./storage"
     ENV: str = "test" if "pytest" in sys.modules else "development"
 
+    # SMTP email configuration
+    SMTP_HOST: str | None = None
+    SMTP_PORT: int = 587
+    SMTP_USER: str | None = None
+    SMTP_PASSWORD: str | None = None
+    SMTP_FROM: str = "noreply@moviemaker.local"
+    SMTP_TLS: bool = True
+
+    # Built-in Python aiosmtpd Mail Server configuration
+    MAIL_SERVER_ENABLED: bool = True
+    MAIL_SERVER_HOST: str = "0.0.0.0"
+    MAIL_SERVER_PORT: int = 1025
+
     # Limit constants
     MAX_IMAGES_PER_JOB: int = 100
     MAX_IMAGE_SIZE_BYTES: int = 20 * 1024 * 1024  # 20 MiB
@@ -28,6 +41,15 @@ class Settings(BaseSettings):
     RETENTION_DAYS: int = 2
     SESSION_LIFETIME_DAYS: int = 7
     TASK_TIME_LIMIT_SECONDS: int = 1800  # 30 minutes
+
+    # Feature 002: captions, compose, music (research R5, R6, R10)
+    CAPTION_MODEL: str = "claude-opus-5-5"
+    CAPTION_CHUNK_SIZE: int = 20
+    CAPTION_IMAGE_MAX_PX: int = 1024
+    MAX_AUDIO_SIZE_BYTES: int = 30 * 1024 * 1024  # 30 MiB
+    FONTS_DIR: str = "server/assets/fonts"
+    MUSIC_DIR: str = "server/assets/music"
+    CARD_SECONDS: float = 3.0
 
 
 settings = Settings()

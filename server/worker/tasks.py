@@ -3,11 +3,19 @@ from pathlib import Path
 
 from server.app.db import SessionLocal
 from server.app.models import Job, Scene, Shot, SourceImage
-from server.app.storage import delete_job_media, get_final_video_path, get_shot_path
+from server.app.render_options import RenderOptions
+from server.app.storage import (
+    delete_job_media,
+    get_final_video_path,
+    get_shot_path,
+    get_subtitles_path,
+)
 from server.worker.celery_app import celery_app
+from server.worker.pipeline.compose import ClipInput, compose
 from server.worker.pipeline.frames import extract_last_frame
-from server.worker.pipeline.join import join_shots
+from server.worker.pipeline.probe import probe_media
 from server.worker.pipeline.progress import update_job_progress
+from server.worker.pipeline.timeline import build_timeline
 from server.worker.providers.base import ProviderError, ShotRequest
 from server.worker.providers.registry import get_provider
 
@@ -51,7 +59,7 @@ def run_job_sync(job_id: str) -> None:
         scenes = db.query(Scene).filter(Scene.job_id == job_id).order_by(Scene.position).all()
         if not scenes:
             update_job_progress(
-                db, job_id, status="failed", failure_reason="No scenes found for job"
+                db, job_id, status="failed", message="No scenes found", failure_reason="No scenes found for job"
             )
             return
 
@@ -147,21 +155,78 @@ def run_job_sync(job_id: str) -> None:
                     db,
                     job_id,
                     status="failed",
+                    message=f"Shot {i} failed",
                     failure_reason=f"Shot {i} failed: {last_error}",
                 )
                 return
 
-        # All shots generated, now join
-        update_job_progress(db, job_id, progress=90, message="Joining video shots")
+        # All shots generated: place them on one timeline and join (FR-041, FR-042)
+        update_job_progress(db, job_id, progress=90, message="Joining scenes")
         final_video_path = get_final_video_path(job_id)
-        join_shots(shot_paths, final_video_path, width=job.width, height=job.height, fps=job.fps)
+        try:
+            final_duration = _compose_job(db, job, scenes, shot_paths, final_video_path)
+        except Exception as e:  # noqa: BLE001 - any compose failure fails the job with a reason
+            update_job_progress(
+                db, job_id, status="failed", message="Joining scenes failed", failure_reason=f"Joining scenes failed: {e}"
+            )
+            return
 
         job.final_video_path = str(final_video_path)
+        job.final_duration_seconds = final_duration
         update_job_progress(
             db, job_id, status="succeeded", progress=100, message="Video generation complete"
         )
     finally:
         db.close()
+
+
+def _compose_job(db, job: Job, scenes: list[Scene], shot_paths: list[Path], output: Path) -> float:
+    """Probe clips, build the timeline, record scene times, and render the final video.
+
+    Returns the measured length of the final video in seconds.
+    """
+    options = RenderOptions.from_storage(job.render_options)
+    clips = [ClipInput(path=p, info=probe_media(p)) for p in shot_paths]
+    lengths = [
+        min(clip.info.duration_seconds, scene.duration_seconds)
+        for clip, scene in zip(clips, scenes)
+    ]
+    timeline = build_timeline(
+        lengths,
+        [scene.transition for scene in scenes],
+        options.transition,
+        options.transition_seconds,
+    )
+    for scene, placed in zip(scenes, timeline.scenes):
+        scene.start_seconds = round(placed.start_seconds, 3)
+        scene.length_seconds = round(placed.length_seconds, 3)
+    db.commit()
+
+    subtitles_path = None
+    has_captions = any(s.caption and s.caption.strip() for s in scenes)
+    caption_pos = getattr(options, "caption_position", "bottom")
+    if has_captions and caption_pos != "none":
+        from server.worker.pipeline.subtitles import write_ass, write_srt
+
+        ass_path = get_subtitles_path(job.id, "ass")
+        srt_path = get_subtitles_path(job.id, "srt")
+        write_ass(timeline, scenes, options, job.width, job.height, ass_path)
+        write_srt(timeline, scenes, srt_path)
+        job.subtitles_ass_path = str(ass_path)
+        job.subtitles_srt_path = str(srt_path)
+        db.commit()
+        subtitles_path = ass_path
+
+    compose(
+        timeline,
+        clips,
+        job.width,
+        job.height,
+        job.fps,
+        output,
+        subtitles_path=subtitles_path,
+    )
+    return round(probe_media(output).duration_seconds, 3)
 
 
 @celery_app.task(bind=True, name="run_job")
@@ -172,3 +237,11 @@ def run_job(self, job_id: str):
 @celery_app.task(name="expire_old_jobs_task")
 def expire_old_jobs_task():
     return expire_old_jobs()
+
+
+@celery_app.task(name="send_verification_email_task")
+def send_verification_email_task(to_email: str, code: str, username: str) -> bool:
+    """Asynchronous Celery task for dispatching verification emails."""
+    from server.app.email_sender import send_verification_email
+
+    return send_verification_email(to_email=to_email, code=code, username=username)

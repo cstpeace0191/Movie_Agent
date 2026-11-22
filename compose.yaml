@@ -110,10 +110,13 @@ services:
       VIDEO_PROVIDER: ${VIDEO_PROVIDER:-mock}
       SESSION_SECRET: ${SESSION_SECRET:-change-this-to-a-secure-random-secret-key-in-production}
       LTX_COMFYUI_URL: ${LTX_COMFYUI_URL:-http://host.docker.internal:8188}
+      MAIL_SERVER_ENABLED: "true"
+      MAIL_SERVER_PORT: "1025"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
       - "8000:8000"
+      - "1025:1025"
     volumes:
       - storage_data:/app/storage
     depends_on:
@@ -158,6 +161,7 @@ services:
       context: ./
       target: worker
     container_name: movie_maker_worker
+    command: ["celery", "-A", "server.worker.celery_app", "worker", "-Q", "generation", "--concurrency=1", "-l", "info"]
     env_file:
       - path: ./server/.env
         required: false
@@ -171,6 +175,40 @@ services:
       C_FORCE_ROOT: "1"
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    volumes:
+      - storage_data:/app/storage
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  ###################################################
+  # Service: worker-planning (feature 002)
+  #
+  # GPU 없이 가벼운 작업(캡션 초안, 보관 기간 정리, 인증 메일)을 처리하는 워커입니다.
+  # GPU 생성 작업(worker, -Q generation) 뒤에서 기다리지 않도록 planning 큐를 따로 소비합니다.
+  ###################################################
+  worker-planning:
+    image: movie-maker-worker:prod
+    build:
+      context: ./
+      target: worker
+    container_name: movie_maker_worker_planning
+    command: ["celery", "-A", "server.worker.celery_app", "worker", "-Q", "planning", "--concurrency=1", "-l", "info"]
+    env_file:
+      - path: ./server/.env
+        required: false
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: mysql+pymysql://movie_user:movie_password@mysql:3306/movie_agent?charset=utf8mb4
+      STORAGE_DIR: /app/storage
+      VIDEO_PROVIDER: ${VIDEO_PROVIDER:-mock}
+      SESSION_SECRET: ${SESSION_SECRET:-change-this-to-a-secure-random-secret-key-in-production}
+      C_FORCE_ROOT: "1"
     volumes:
       - storage_data:/app/storage
     depends_on:
